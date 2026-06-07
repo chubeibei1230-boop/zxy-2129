@@ -254,12 +254,17 @@ export const useMaterialStore = defineStore('material', () => {
     remark: string;
   }) {
     const now = new Date().toISOString();
+    const existingPack = materialPacks.value.find(p => p.id === packId);
+    const existingException = existingPack?.exception;
+    
     const exception: ExceptionRecord = {
       type: data.type,
       priority: data.priority,
       remark: data.remark,
-      status: 'pending',
-      createdAt: now,
+      status: existingException?.status || 'pending',
+      handler: existingException?.handler,
+      result: existingException?.result,
+      createdAt: existingException?.createdAt || now,
       updatedAt: now,
     };
     await updateMaterialPackData(packId, { exception });

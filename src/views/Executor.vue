@@ -22,10 +22,15 @@ const touchGhostEl = ref<HTMLElement | null>(null);
 const cardRefs = ref<HTMLElement[]>([]);
 
 const showExceptionModal = ref(false);
-const selectedExceptionPack = ref<MaterialPack | null>(null);
+const selectedExceptionPackId = ref<string | null>(null);
 const handlerName = ref('');
 const resultText = ref('');
 const showHandlerInput = ref(false);
+
+const selectedExceptionPack = computed(() => {
+  if (!selectedExceptionPackId.value) return null;
+  return store.materialPacks.find((p: MaterialPack) => p.id === selectedExceptionPackId.value) || null;
+});
 
 const filteredPacks = computed(() => {
   let packs = [...store.materialPacks];
@@ -228,8 +233,9 @@ function isDragOver(pack: MaterialPack): boolean {
 }
 
 function openExceptionModal(pack: MaterialPack) {
-  selectedExceptionPack.value = pack;
+  selectedExceptionPackId.value = pack.id;
   resultText.value = pack.exception?.result || '';
+  handlerName.value = pack.exception?.handler || '';
   showHandlerInput.value = false;
   showExceptionModal.value = true;
 }

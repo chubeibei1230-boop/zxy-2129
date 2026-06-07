@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import type { MaterialPack, Batch, Area, UserRole, ExportData, ExceptionRecord, ExceptionType, ExceptionStatus, BatchStatus } from '@/types';
+import type { MaterialPack, Batch, Area, UserRole, ExportData, ExceptionRecord, ExceptionType, ExceptionStatus, BatchStatus, HandoverRecord } from '@/types';
 import {
   getAllMaterialPacks,
   addMaterialPack,
@@ -383,6 +383,39 @@ export const useMaterialStore = defineStore('material', () => {
     }
   }
 
+  function canEditHandover(batchId: string): boolean {
+    const batch = batches.value.find(b => b.id === batchId);
+    if (!batch) return false;
+    return batch.status === 'pending_review' || batch.status === 'completed';
+  }
+
+  function isHandoverAbnormal(batchId: string): boolean {
+    const batch = batches.value.find(b => b.id === batchId);
+    if (!batch) return false;
+    if (batch.status !== 'completed') return false;
+    return !batch.handover;
+  }
+
+  async function setHandover(batchId: string, data: Omit<HandoverRecord, 'createdAt' | 'updatedAt'>) {
+    const index = batches.value.findIndex(b => b.id === batchId);
+    if (index === -1) return;
+
+    const batch = batches.value[index];
+    const now = new Date().toISOString();
+    
+    const handover: HandoverRecord = {
+      ...data,
+      createdAt: batch.handover?.createdAt || now,
+      updatedAt: now,
+    };
+
+    await updateBatchData(batchId, { handover });
+  }
+
+  async function clearHandover(batchId: string) {
+    await updateBatchData(batchId, { handover: null });
+  }
+
   const exceptionPacks = computed(() => {
     return materialPacks.value.filter(p => p.exception && p.exception.status !== 'resolved');
   });
@@ -478,6 +511,10 @@ export const useMaterialStore = defineStore('material', () => {
     updateExceptionStatus,
     updateExceptionResult,
     clearException,
+    canEditHandover,
+    isHandoverAbnormal,
+    setHandover,
+    clearHandover,
     exportDraft,
     importDraft,
     sortByPriority,

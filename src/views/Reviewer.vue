@@ -2,13 +2,14 @@
 import { ref, computed } from 'vue';
 import PageHeader from '@/components/PageHeader.vue';
 import { useMaterialStore } from '@/stores/material';
-import { formatDateTime, getPriorityLabel, getPriorityColor, getExceptionTypeLabel, getExceptionTypeColor, getExceptionStatusLabel, getExceptionStatusColor, getBatchStatusLabel, getBatchStatusColor, getBatchStatusIcon } from '@/utils/helpers';
+import { formatDateTime, getPriorityLabel, getPriorityColor, getExceptionTypeLabel, getExceptionTypeColor, getExceptionStatusLabel, getExceptionStatusColor, getBatchStatusLabel, getBatchStatusColor, getBatchStatusIcon, getHandoverStatusLabel, getHandoverStatusColor, getHandoverStatusIcon } from '@/utils/helpers';
 import type { MaterialPack, Batch } from '@/types';
 
 const store = useMaterialStore();
 const reviewerName = ref('');
 const showReviewerInput = ref(false);
 const selectedReviewer = ref<string>('');
+const filterHandoverStatus = ref<string>('all');
 
 const batchesWithPacks = computed(() => {
   const batchIds = new Set(store.batches.map(b => b.id));
@@ -16,7 +17,7 @@ const batchesWithPacks = computed(() => {
     (p: MaterialPack) => !p.batchId || !batchIds.has(p.batchId)
   );
 
-  const result = store.batches.map((batch: Batch) => {
+  let result = store.batches.map((batch: Batch) => {
     const packs = store.materialPacks.filter((p: MaterialPack) => p.batchId === batch.id);
     const stats = store.getBatchStats(batch.id);
     return {
@@ -26,7 +27,15 @@ const batchesWithPacks = computed(() => {
     };
   }).filter((b: { packs: MaterialPack[] }) => b.packs.length > 0);
 
-  if (unassignedPacks.length > 0) {
+  if (filterHandoverStatus.value === 'handed') {
+    result = result.filter(b => b.handover);
+  } else if (filterHandoverStatus.value === 'unhanded') {
+    result = result.filter(b => !b.handover);
+  } else if (filterHandoverStatus.value === 'abnormal') {
+    result = result.filter(b => store.isHandoverAbnormal(b.id));
+  }
+
+  if (unassignedPacks.length > 0 && filterHandoverStatus.value === 'all') {
     result.unshift({
       id: 'unassigned',
       name: '未分配批次',
@@ -102,7 +111,7 @@ function printNow() {
 
     <main class="max-w-7xl mx-auto px-6 py-8">
       <!-- 统计概览 -->
-      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8 no-print">
+      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6 no-print">
         <div class="bg-white rounded-xl shadow-sm p-5">
           <div class="text-3xl font-bold text-gray-800">{{ totalCount }}</div>
           <div class="text-sm text-gray-500 mt-1">物资包总数</div>
@@ -129,6 +138,25 @@ function printNow() {
         </div>
       </div>
 
+      <!-- 筛选栏 -->
+      <div class="bg-white rounded-xl shadow-sm p-4 mb-8 no-print">
+        <div class="flex flex-wrap items-center gap-4">
+          <div class="flex items-center gap-2">
+            <span class="text-sm text-gray-500">交接状态筛选:</span>
+            <select v-model="filterHandoverStatus" class="select w-36">
+              <option value="all">全部</option>
+              <option value="handed">已交接</option>
+              <option value="unhanded">未交接</option>
+              <option value="abnormal">异常未交接</option>
+            </select>
+          </div>
+          <div v-if="filterHandoverStatus !== 'all'" class="text-sm text-gray-500">
+            当前筛选: <span class="text-primary-600 font-medium">{{ filterHandoverStatus === 'handed' ? '已交接' : filterHandoverStatus === 'unhanded' ? '未交接' : '异常未交接' }}</span>
+            <button @click="filterHandoverStatus = 'all'" class="ml-2 text-primary-600 hover:text-primary-700 underline">清除筛选</button>
+          </div>
+        </div>
+      </div>
+
       <!-- 打印头部 -->
       <div class="print-only mb-8">
         <div class="text-center">
@@ -152,9 +180,9 @@ function printNow() {
           :class="['print-page', batchIndex > 0 ? 'pt-8' : '']"
         >
           <!-- 批次标题 -->
-          <div :class="['mb-4 no-print rounded-xl p-4', isBatchCompleted(batch) ? 'bg-green-50 border-2 border-green-200' : batch.status === 'pending_review' ? 'bg-amber-50 border-2 border-amber-200' : 'bg-blue-50 border-2 border-blue-200']">
-            <div class="flex items-center justify-between mb-3">
-              <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+          <div :class="['mb-4 no-print rounded-xl p-4', isBatchCompleted(batch) ? 'bg-green-50 border-2 border-green-200' : batch.status === 'pending_review' ? 'bg-amber-50 border-2 border-amber-200' : 'bg-blue-50 border-2 border-blue-200', batch.id !== 'unassigned' && store.isHandoverAbnormal(batch.id) ? 'border-2 border-red-300 bg-red-50/30' : '']">
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+              <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2 flex-wrap">
                 <span class="w-8 h-8 bg-info-500 text-white rounded-lg flex items-center justify-center text-sm">
                   {{ batchIndex + 1 }}
                 </span>
@@ -162,8 +190,11 @@ function printNow() {
                 <span :class="['tag', getBatchStatusColor(batch.status)]">
                   {{ getBatchStatusIcon(batch.status) }} {{ getBatchStatusLabel(batch.status) }}
                 </span>
+                <span v-if="batch.id !== 'unassigned'" :class="['tag', getHandoverStatusColor(!!batch.handover, store.isHandoverAbnormal(batch.id))]">
+                  {{ getHandoverStatusIcon(!!batch.handover, store.isHandoverAbnormal(batch.id)) }} {{ getHandoverStatusLabel(!!batch.handover, store.isHandoverAbnormal(batch.id)) }}
+                </span>
               </h2>
-              <div class="flex items-center gap-4">
+              <div class="flex flex-wrap items-center gap-4">
                 <div class="text-sm">
                   <span class="text-primary-600 font-bold text-lg">{{ batch.stats.reviewed }}</span>
                   <span class="text-gray-500">/{{ batch.stats.total }} 已复核</span>
@@ -217,6 +248,29 @@ function printNow() {
               </div>
             </div>
 
+            <div v-if="batch.id !== 'unassigned' && batch.handover" class="mt-3 p-3 bg-white/80 rounded-lg border border-gray-200">
+              <div class="flex items-center gap-1 mb-2">
+                <span>🤝</span>
+                <span class="text-sm font-medium text-gray-700">交接信息</span>
+              </div>
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs text-gray-600">
+                <div><span class="text-gray-400">交接人:</span> {{ batch.handover.handoverPerson }}</div>
+                <div><span class="text-gray-400">接收人:</span> {{ batch.handover.receiver }}</div>
+                <div><span class="text-gray-400">联系方式:</span> {{ batch.handover.contactInfo || '-' }}</div>
+                <div><span class="text-gray-400">交接时间:</span> {{ batch.handover.handoverTime }}</div>
+              </div>
+              <div v-if="batch.handover.remark" class="mt-2 text-xs text-gray-600">
+                <span class="text-gray-400">备注:</span> {{ batch.handover.remark }}
+              </div>
+            </div>
+
+            <div v-else-if="batch.id !== 'unassigned' && store.isHandoverAbnormal(batch.id)" class="mt-3 p-3 bg-red-50 rounded-lg border border-red-200">
+              <div class="flex items-center gap-2 text-sm text-red-700">
+                <span>⚠️</span>
+                <span class="font-medium">异常：该批次已完成但尚未登记交接信息，请联系协调员补充</span>
+              </div>
+            </div>
+
             <p v-if="isBatchCompleted(batch)" class="text-green-700 text-xs mt-3 text-center font-medium bg-green-100 rounded-lg py-1.5">
               🔒 该批次已正式交接完成，内容只读
             </p>
@@ -233,6 +287,18 @@ function printNow() {
             <p v-if="batch.deliveryTime" class="text-gray-600 text-sm mt-1">
               配送时间: {{ batch.deliveryTime }}
             </p>
+            <div v-if="batch.id !== 'unassigned' && batch.handover" class="mt-3 p-3 bg-gray-50 border border-gray-200 rounded">
+              <h4 class="text-sm font-bold text-gray-800 mb-2">🤝 交接信息</h4>
+              <div class="grid grid-cols-2 gap-2 text-sm text-gray-600">
+                <div><span class="text-gray-500">交接人:</span> {{ batch.handover.handoverPerson }}</div>
+                <div><span class="text-gray-500">接收人:</span> {{ batch.handover.receiver }}</div>
+                <div><span class="text-gray-500">联系方式:</span> {{ batch.handover.contactInfo || '-' }}</div>
+                <div><span class="text-gray-500">交接时间:</span> {{ batch.handover.handoverTime }}</div>
+              </div>
+              <div v-if="batch.handover.remark" class="mt-2 text-sm text-gray-600">
+                <span class="text-gray-500">备注:</span> {{ batch.handover.remark }}
+              </div>
+            </div>
           </div>
 
           <!-- 表格 -->

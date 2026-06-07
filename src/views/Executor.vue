@@ -2,7 +2,7 @@
 import { ref, computed, onUnmounted } from 'vue';
 import PageHeader from '@/components/PageHeader.vue';
 import { useMaterialStore } from '@/stores/material';
-import { getPriorityLabel, getPriorityColor, getExceptionTypeLabel, getExceptionTypeColor, getExceptionStatusLabel, getExceptionStatusColor, getExceptionPriorityLabel, formatDateTime, getBatchStatusLabel, getBatchStatusColor, getBatchStatusIcon } from '@/utils/helpers';
+import { getPriorityLabel, getPriorityColor, getExceptionTypeLabel, getExceptionTypeColor, getExceptionStatusLabel, getExceptionStatusColor, getExceptionPriorityLabel, formatDateTime, getBatchStatusLabel, getBatchStatusColor, getBatchStatusIcon, getHandoverStatusLabel, getHandoverStatusColor, getHandoverStatusIcon } from '@/utils/helpers';
 import type { MaterialPack } from '@/types';
 import Modal from '@/components/Modal.vue';
 
@@ -366,15 +366,18 @@ async function handleDeferException() {
         </div>
       </div>
 
-      <div v-if="selectedBatchInfo" :class="['rounded-xl p-5 mb-8 no-print', selectedBatchInfo.status === 'completed' ? 'bg-green-50 border-2 border-green-300' : selectedBatchInfo.status === 'pending_review' ? 'bg-amber-50 border-2 border-amber-300' : 'bg-blue-50 border-2 border-blue-300']">
-        <div class="flex items-center justify-between mb-4">
-          <div class="flex items-center gap-2">
+      <div v-if="selectedBatchInfo" :class="['rounded-xl p-5 mb-8 no-print', selectedBatchInfo.status === 'completed' ? 'bg-green-50 border-2 border-green-300' : selectedBatchInfo.status === 'pending_review' ? 'bg-amber-50 border-2 border-amber-300' : 'bg-blue-50 border-2 border-blue-300', store.isHandoverAbnormal(selectedBatchInfo.id) ? 'border-2 border-red-300 bg-red-50/50' : '']">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div class="flex flex-wrap items-center gap-2">
             <span class="text-2xl">{{ getBatchStatusIcon(selectedBatchInfo.status) }}</span>
             <p :class="['font-bold text-lg', selectedBatchInfo.status === 'completed' ? 'text-green-800' : selectedBatchInfo.status === 'pending_review' ? 'text-amber-800' : 'text-blue-800']">
               {{ selectedBatchInfo.name }}
             </p>
             <span :class="['tag', getBatchStatusColor(selectedBatchInfo.status)]">
               {{ getBatchStatusLabel(selectedBatchInfo.status) }}
+            </span>
+            <span :class="['tag', getHandoverStatusColor(!!selectedBatchInfo.handover, store.isHandoverAbnormal(selectedBatchInfo.id))]">
+              {{ getHandoverStatusIcon(!!selectedBatchInfo.handover, store.isHandoverAbnormal(selectedBatchInfo.id)) }} {{ getHandoverStatusLabel(!!selectedBatchInfo.handover, store.isHandoverAbnormal(selectedBatchInfo.id)) }}
             </span>
           </div>
           <span v-if="selectedBatchInfo.status === 'completed' && selectedBatchInfo.completedAt" class="text-sm text-green-600 font-medium">
@@ -448,6 +451,29 @@ async function handleDeferException() {
             :class="['h-2 rounded-full transition-all duration-500', selectedBatchInfo.status === 'completed' ? 'bg-green-500' : selectedBatchInfo.status === 'pending_review' ? 'bg-amber-500' : 'bg-blue-500']"
             :style="{ width: `${selectedBatchInfo.stats.total > 0 ? selectedBatchInfo.stats.reviewed / selectedBatchInfo.stats.total * 100 : 0}%` }"
           ></div>
+        </div>
+
+        <div v-if="selectedBatchInfo.handover" class="mt-4 p-3 bg-white/80 rounded-lg border border-gray-200">
+          <div class="flex items-center gap-1 mb-2">
+            <span>🤝</span>
+            <span class="text-sm font-medium text-gray-700">交接信息</span>
+          </div>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs text-gray-600">
+            <div><span class="text-gray-400">交接人:</span> {{ selectedBatchInfo.handover.handoverPerson }}</div>
+            <div><span class="text-gray-400">接收人:</span> {{ selectedBatchInfo.handover.receiver }}</div>
+            <div><span class="text-gray-400">联系方式:</span> {{ selectedBatchInfo.handover.contactInfo || '-' }}</div>
+            <div><span class="text-gray-400">交接时间:</span> {{ selectedBatchInfo.handover.handoverTime }}</div>
+          </div>
+          <div v-if="selectedBatchInfo.handover.remark" class="mt-2 text-xs text-gray-600">
+            <span class="text-gray-400">备注:</span> {{ selectedBatchInfo.handover.remark }}
+          </div>
+        </div>
+
+        <div v-else-if="store.isHandoverAbnormal(selectedBatchInfo.id)" class="mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
+          <div class="flex items-center gap-2 text-sm text-red-700">
+            <span>⚠️</span>
+            <span class="font-medium">异常：该批次已完成但尚未登记交接信息，请联系协调员补充</span>
+          </div>
         </div>
 
         <p v-if="selectedBatchInfo.status === 'completed'" class="text-green-700 text-sm mt-4 text-center font-medium bg-green-100 rounded-lg py-2">

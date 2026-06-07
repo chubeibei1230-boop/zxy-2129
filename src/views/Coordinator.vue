@@ -3,7 +3,7 @@ import { ref, reactive } from 'vue';
 import PageHeader from '@/components/PageHeader.vue';
 import Modal from '@/components/Modal.vue';
 import { useMaterialStore } from '@/stores/material';
-import { getPriorityLabel, getPriorityColor, getExceptionTypeLabel, getExceptionTypeColor, getExceptionStatusLabel, getExceptionStatusColor, getExceptionPriorityLabel, getExceptionPriorityColor, getBatchStatusLabel, getBatchStatusColor, getBatchStatusIcon, formatDateTime } from '@/utils/helpers';
+import { getPriorityLabel, getPriorityColor, getExceptionTypeLabel, getExceptionTypeColor, getExceptionStatusLabel, getExceptionStatusColor, getExceptionPriorityLabel, getExceptionPriorityColor, getBatchStatusLabel, getBatchStatusColor, getBatchStatusIcon, formatDateTime, getHandoverStatusLabel, getHandoverStatusColor, getHandoverStatusIcon } from '@/utils/helpers';
 import type { MaterialPack, Batch, Area } from '@/types';
 
 const store = useMaterialStore();
@@ -24,11 +24,14 @@ const showBatchModal = ref(false);
 const showAreaModal = ref(false);
 const showExceptionModal = ref(false);
 const showCloseBatchModal = ref(false);
+const showHandoverModal = ref(false);
 const editingId = ref<string | null>(null);
 const exceptionPackId = ref<string | null>(null);
 const closingBatchId = ref<string | null>(null);
+const handoverBatchId = ref<string | null>(null);
 const closeReasons = ref<string[]>([]);
 const coordinatorName = ref('');
+const filterHandoverStatus = ref<string>('all');
 
 // 表单数据
 const packForm = reactive({
@@ -53,6 +56,14 @@ const areaForm = reactive({
 const exceptionForm = reactive({
   type: 'shortage' as 'shortage' | 'incomplete' | 'area_pending' | 'cancelled',
   priority: 2,
+  remark: '',
+});
+
+const handoverForm = reactive({
+  handoverPerson: '',
+  receiver: '',
+  contactInfo: '',
+  handoverTime: '',
   remark: '',
 });
 
@@ -300,6 +311,72 @@ function getBatchName(id: string) {
 function getAreaName(id: string) {
   return store.areaMap.get(id)?.name || '未分配';
 }
+
+function resetHandoverForm() {
+  handoverForm.handoverPerson = '';
+  handoverForm.receiver = '';
+  handoverForm.contactInfo = '';
+  handoverForm.handoverTime = formatDateTime(new Date());
+  handoverForm.remark = '';
+  handoverBatchId.value = null;
+}
+
+function openHandoverModal(batchId: string) {
+  if (!store.canEditHandover(batchId)) {
+    alert('该批次尚未进入待复核或已完成阶段，暂不支持交接记录');
+    return;
+  }
+  resetHandoverForm();
+  handoverBatchId.value = batchId;
+  const batch = store.batches.find(b => b.id === batchId);
+  if (batch?.handover) {
+    handoverForm.handoverPerson = batch.handover.handoverPerson;
+    handoverForm.receiver = batch.handover.receiver;
+    handoverForm.contactInfo = batch.handover.contactInfo;
+    handoverForm.handoverTime = batch.handover.handoverTime;
+    handoverForm.remark = batch.handover.remark;
+  } else {
+    handoverForm.handoverTime = formatDateTime(new Date());
+  }
+  showHandoverModal.value = true;
+}
+
+async function saveHandover() {
+  if (!handoverBatchId.value) return;
+  if (!handoverForm.handoverPerson.trim() || !handoverForm.receiver.trim()) {
+    alert('请填写交接人和接收人');
+    return;
+  }
+  await store.setHandover(handoverBatchId.value, {
+    handoverPerson: handoverForm.handoverPerson.trim(),
+    receiver: handoverForm.receiver.trim(),
+    contactInfo: handoverForm.contactInfo.trim(),
+    handoverTime: handoverForm.handoverTime.trim(),
+    remark: handoverForm.remark.trim(),
+  });
+  showHandoverModal.value = false;
+  resetHandoverForm();
+}
+
+async function removeHandover(batchId: string) {
+  if (confirm('确定要清除该批次的交接记录吗？')) {
+    await store.clearHandover(batchId);
+  }
+}
+
+const filteredBatches = computed(() => {
+  let batches = [...store.batches];
+  
+  if (filterHandoverStatus.value === 'handed') {
+    batches = batches.filter(b => b.handover);
+  } else if (filterHandoverStatus.value === 'unhanded') {
+    batches = batches.filter(b => !b.handover);
+  } else if (filterHandoverStatus.value === 'abnormal') {
+    batches = batches.filter(b => store.isHandoverAbnormal(b.id));
+  }
+  
+  return batches;
+});
 </script>
 
 <template>
@@ -423,29 +500,44 @@ function getAreaName(id: string) {
 
       <!-- 批次管理 -->
       <div v-if="activeTab === 'batches'">
-        <div class="flex items-center justify-between mb-6">
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
           <h2 class="text-lg font-bold text-gray-800">
-            配送批次 ({{ store.batches.length }})
+            配送批次 ({{ filteredBatches.length }})
           </h2>
-          <button @click="openAddBatch" class="btn btn-primary">
-            <span class="mr-2">+</span>新增批次
-          </button>
+          <div class="flex items-center gap-3">
+            <div class="flex items-center gap-2">
+              <span class="text-sm text-gray-500">交接状态:</span>
+              <select v-model="filterHandoverStatus" class="select w-36">
+                <option value="all">全部</option>
+                <option value="handed">已交接</option>
+                <option value="unhanded">未交接</option>
+                <option value="abnormal">异常未交接</option>
+              </select>
+            </div>
+            <button @click="openAddBatch" class="btn btn-primary">
+              <span class="mr-2">+</span>新增批次
+            </button>
+          </div>
         </div>
 
-        <div v-if="store.batches.length === 0" class="bg-white rounded-xl p-12 text-center">
+        <div v-if="filteredBatches.length === 0" class="bg-white rounded-xl p-12 text-center">
           <div class="text-5xl mb-4">🚚</div>
-          <p class="text-gray-500 mb-4">暂无批次数据</p>
+          <p class="text-gray-500 mb-4">暂无符合条件的批次数据</p>
+          <button v-if="filterHandoverStatus !== 'all'" @click="filterHandoverStatus = 'all'" class="btn btn-outline mr-2">清除筛选</button>
           <button @click="openAddBatch" class="btn btn-primary">添加第一个批次</button>
         </div>
 
         <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div v-for="batch in store.batches" :key="batch.id" :class="['card p-5', batch.status === 'completed' ? 'border-2 border-green-300 bg-green-50/30' : batch.status === 'pending_review' ? 'border-2 border-amber-300 bg-amber-50/30' : 'border-2 border-blue-200 bg-blue-50/20']">
+          <div v-for="batch in filteredBatches" :key="batch.id" :class="['card p-5', batch.status === 'completed' ? 'border-2 border-green-300 bg-green-50/30' : batch.status === 'pending_review' ? 'border-2 border-amber-300 bg-amber-50/30' : 'border-2 border-blue-200 bg-blue-50/20', store.isHandoverAbnormal(batch.id) ? 'border-2 border-red-300 bg-red-50/30' : '']">
             <div class="flex items-start justify-between mb-4">
               <div>
-                <div class="flex items-center gap-2 mb-1">
+                <div class="flex flex-wrap items-center gap-2 mb-1">
                   <h3 class="font-bold text-gray-800 text-xl">{{ batch.name }}</h3>
                   <span :class="['tag', getBatchStatusColor(batch.status)]">
                     {{ getBatchStatusIcon(batch.status) }} {{ getBatchStatusLabel(batch.status) }}
+                  </span>
+                  <span :class="['tag', getHandoverStatusColor(!!batch.handover, store.isHandoverAbnormal(batch.id))]">
+                    {{ getHandoverStatusIcon(!!batch.handover, store.isHandoverAbnormal(batch.id)) }} {{ getHandoverStatusLabel(!!batch.handover, store.isHandoverAbnormal(batch.id)) }}
                   </span>
                 </div>
                 <p class="text-gray-500 text-sm">
@@ -549,16 +641,56 @@ function getAreaName(id: string) {
                 :style="{ width: `${getBatchStats(batch.id).total > 0 ? getBatchStats(batch.id).reviewed / getBatchStats(batch.id).total * 100 : 0}%` }"
               ></div>
             </div>
+
+            <div v-if="batch.handover" class="mb-4 p-3 bg-white/80 rounded-lg border border-gray-200">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-sm font-medium text-gray-700 flex items-center gap-1">
+                  <span>🤝</span> 交接信息
+                </span>
+                <button
+                  v-if="store.canEditHandover(batch.id)"
+                  @click="removeHandover(batch.id)"
+                  class="text-xs text-red-500 hover:text-red-600"
+                >
+                  清除
+                </button>
+              </div>
+              <div class="grid grid-cols-2 gap-2 text-xs text-gray-600">
+                <div><span class="text-gray-400">交接人:</span> {{ batch.handover.handoverPerson }}</div>
+                <div><span class="text-gray-400">接收人:</span> {{ batch.handover.receiver }}</div>
+                <div><span class="text-gray-400">联系方式:</span> {{ batch.handover.contactInfo || '-' }}</div>
+                <div><span class="text-gray-400">交接时间:</span> {{ batch.handover.handoverTime }}</div>
+              </div>
+              <div v-if="batch.handover.remark" class="mt-2 text-xs text-gray-600">
+                <span class="text-gray-400">备注:</span> {{ batch.handover.remark }}
+              </div>
+            </div>
+
+            <div v-else-if="store.isHandoverAbnormal(batch.id)" class="mb-4 p-3 bg-red-50 rounded-lg border border-red-200">
+              <div class="flex items-center gap-2 text-sm text-red-700">
+                <span>⚠️</span>
+                <span class="font-medium">异常：该批次已完成但尚未登记交接信息</span>
+              </div>
+            </div>
             
             <div class="pt-3 border-t border-gray-100">
-              <button
-                v-if="batch.status !== 'completed'"
-                @click="openCloseBatch(batch.id)"
-                :class="['w-full btn text-sm py-2.5', getBatchStats(batch.id).unreviewed === 0 && getBatchStats(batch.id).unresolvedExceptions === 0 ? 'btn-primary' : 'btn-outline']"
-              >
-                <span class="mr-1">🔒</span>发起闭环确认
-              </button>
-              <div v-else class="text-center text-sm text-green-600 font-medium bg-green-100 rounded-lg py-2.5">
+              <div class="flex items-center gap-2">
+                <button
+                  v-if="batch.status !== 'completed'"
+                  @click="openCloseBatch(batch.id)"
+                  :class="['flex-1 btn text-sm py-2.5', getBatchStats(batch.id).unreviewed === 0 && getBatchStats(batch.id).unresolvedExceptions === 0 ? 'btn-primary' : 'btn-outline']"
+                >
+                  <span class="mr-1">🔒</span>发起闭环确认
+                </button>
+                <button
+                  v-if="store.canEditHandover(batch.id)"
+                  @click="openHandoverModal(batch.id)"
+                  class="flex-1 btn btn-outline text-sm py-2.5"
+                >
+                  <span class="mr-1">🤝</span>{{ batch.handover ? '修改交接' : '登记交接' }}
+                </button>
+              </div>
+              <div v-if="batch.status === 'completed'" class="mt-2 text-center text-sm text-green-600 font-medium bg-green-100 rounded-lg py-2">
                 ✅ 已正式交接完成 · 内容只读
               </div>
             </div>
@@ -938,6 +1070,49 @@ function getAreaName(id: string) {
         >
           确认闭环
         </button>
+      </template>
+    </Modal>
+
+    <!-- 交接记录弹窗 -->
+    <Modal v-model:visible="showHandoverModal" :title="handoverBatchId && store.batches.find(b => b.id === handoverBatchId)?.handover ? '修改交接记录' : '登记交接记录'">
+      <div class="space-y-4">
+        <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
+          <p class="text-blue-800 text-sm">
+            <span class="font-bold">💡 提示：</span>请填写完整的交接信息，确保物资流转可追溯。
+          </p>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">交接人 <span class="text-red-500">*</span></label>
+            <input v-model="handoverForm.handoverPerson" type="text" class="input" placeholder="请输入交接人姓名" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">接收人 <span class="text-red-500">*</span></label>
+            <input v-model="handoverForm.receiver" type="text" class="input" placeholder="请输入接收人姓名" />
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">联系方式</label>
+            <input v-model="handoverForm.contactInfo" type="text" class="input" placeholder="请输入联系电话" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">交接时间</label>
+            <input v-model="handoverForm.handoverTime" type="text" class="input" placeholder="例如：2024-06-08 10:30" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">交接备注</label>
+          <textarea
+            v-model="handoverForm.remark"
+            class="input min-h-[80px]"
+            placeholder="请输入交接备注信息（可选）"
+          />
+        </div>
+      </div>
+      <template #footer>
+        <button @click="showHandoverModal = false" class="btn btn-outline">取消</button>
+        <button @click="saveHandover" class="btn btn-primary">保存</button>
       </template>
     </Modal>
   </div>

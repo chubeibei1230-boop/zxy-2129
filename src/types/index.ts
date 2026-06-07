@@ -31,6 +31,16 @@ export interface MaterialPack {
   updatedAt: string;
 }
 
+export interface HandoverRecord {
+  handoverPerson: string;
+  receiver: string;
+  contactInfo: string;
+  handoverTime: string;
+  remark: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Batch {
   id: string;
   name: string;
@@ -39,6 +49,7 @@ export interface Batch {
   status: BatchStatus;
   completedAt?: string;
   closedBy?: string;
+  handover?: HandoverRecord | null;
   createdAt: string;
 }
 

@@ -152,6 +152,24 @@ export function getBatchStatusIcon(status: string): string {
   return icons[status] || '❓';
 }
 
+export function getHandoverStatusLabel(hasHandover: boolean | null | undefined, isAbnormal: boolean = false): string {
+  if (isAbnormal) return '异常未交接';
+  if (hasHandover) return '已交接';
+  return '未交接';
+}
+
+export function getHandoverStatusColor(hasHandover: boolean | null | undefined, isAbnormal: boolean = false): string {
+  if (isAbnormal) return 'bg-red-100 text-red-800';
+  if (hasHandover) return 'bg-green-100 text-green-800';
+  return 'bg-gray-100 text-gray-800';
+}
+
+export function getHandoverStatusIcon(hasHandover: boolean | null | undefined, isAbnormal: boolean = false): string {
+  if (isAbnormal) return '⚠️';
+  if (hasHandover) return '🤝';
+  return '📋';
+}
+
 export function debounce<T extends (...args: any[]) => any>(
   func: T,
   wait: number

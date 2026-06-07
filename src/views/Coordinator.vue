@@ -3,16 +3,17 @@ import { ref, reactive } from 'vue';
 import PageHeader from '@/components/PageHeader.vue';
 import Modal from '@/components/Modal.vue';
 import { useMaterialStore } from '@/stores/material';
-import { getPriorityLabel, getPriorityColor } from '@/utils/helpers';
+import { getPriorityLabel, getPriorityColor, getExceptionTypeLabel, getExceptionTypeColor, getExceptionStatusLabel, getExceptionStatusColor, getExceptionPriorityLabel, getExceptionPriorityColor } from '@/utils/helpers';
 import type { MaterialPack, Batch, Area } from '@/types';
 
 const store = useMaterialStore();
 
-type TabType = 'packs' | 'batches' | 'areas';
+type TabType = 'packs' | 'batches' | 'areas' | 'exceptions';
 const activeTab = ref<TabType>('packs');
 
 const tabs = [
   { id: 'packs' as const, label: '物资包管理', icon: '📦' },
+  { id: 'exceptions' as const, label: '异常处理', icon: '⚠️' },
   { id: 'batches' as const, label: '配送批次', icon: '🚚' },
   { id: 'areas' as const, label: '配送区域', icon: '📍' },
 ];
@@ -21,7 +22,9 @@ const tabs = [
 const showPackModal = ref(false);
 const showBatchModal = ref(false);
 const showAreaModal = ref(false);
+const showExceptionModal = ref(false);
 const editingId = ref<string | null>(null);
+const exceptionPackId = ref<string | null>(null);
 
 // 表单数据
 const packForm = reactive({
@@ -41,6 +44,12 @@ const batchForm = reactive({
 const areaForm = reactive({
   name: '',
   priority: 1,
+});
+
+const exceptionForm = reactive({
+  type: 'shortage' as 'shortage' | 'incomplete' | 'area_pending' | 'cancelled',
+  priority: 2,
+  remark: '',
 });
 
 function resetPackForm() {
@@ -181,6 +190,42 @@ async function deleteArea(id: string) {
   }
 }
 
+function resetExceptionForm() {
+  exceptionForm.type = 'shortage';
+  exceptionForm.priority = 2;
+  exceptionForm.remark = '';
+  exceptionPackId.value = null;
+}
+
+function openAddException(packId: string) {
+  resetExceptionForm();
+  exceptionPackId.value = packId;
+  const pack = store.materialPacks.find(p => p.id === packId);
+  if (pack?.exception) {
+    exceptionForm.type = pack.exception.type || 'shortage';
+    exceptionForm.priority = pack.exception.priority;
+    exceptionForm.remark = pack.exception.remark;
+  }
+  showExceptionModal.value = true;
+}
+
+async function saveException() {
+  if (!exceptionPackId.value) return;
+  await store.setException(exceptionPackId.value, {
+    type: exceptionForm.type,
+    priority: exceptionForm.priority,
+    remark: exceptionForm.remark,
+  });
+  showExceptionModal.value = false;
+  resetExceptionForm();
+}
+
+async function removeException(packId: string) {
+  if (confirm('确定要清除这个物资包的异常记录吗？')) {
+    await store.clearException(packId);
+  }
+}
+
 function getBatchName(id: string) {
   return store.batchMap.get(id)?.name || '未分配';
 }
@@ -245,11 +290,12 @@ function getAreaName(id: string) {
                 <th>优先级</th>
                 <th>所属批次</th>
                 <th>配送区域</th>
-                <th class="w-32">操作</th>
+                <th>异常状态</th>
+                <th class="w-44">操作</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="pack in store.materialPacks" :key="pack.id">
+              <tr v-for="pack in store.materialPacks" :key="pack.id" :class="pack.exception ? 'bg-amber-50/50' : ''">
                 <td class="font-medium text-gray-800">{{ pack.name }}</td>
                 <td>
                   <div class="flex flex-wrap gap-1">
@@ -269,12 +315,25 @@ function getAreaName(id: string) {
                 <td>{{ getBatchName(pack.batchId) }}</td>
                 <td>{{ getAreaName(pack.areaId) }}</td>
                 <td>
+                  <span v-if="pack.exception" :class="['tag', getExceptionStatusColor(pack.exception.status)]">
+                    {{ getExceptionStatusLabel(pack.exception.status) }}
+                  </span>
+                  <span v-else class="tag tag-gray">正常</span>
+                </td>
+                <td>
                   <div class="flex items-center gap-2">
                     <button
                       @click="openEditPack(pack)"
                       class="text-primary-600 hover:text-primary-700 text-sm font-medium"
                     >
                       编辑
+                    </button>
+                    <button
+                      @click="openAddException(pack.id)"
+                      :class="pack.exception ? 'text-amber-600 hover:text-amber-700' : 'text-blue-600 hover:text-blue-700'"
+                      class="text-sm font-medium"
+                    >
+                      {{ pack.exception ? '修改异常' : '登记异常' }}
                     </button>
                     <button
                       @click="deletePack(pack.id)"
@@ -389,6 +448,112 @@ function getAreaName(id: string) {
           </div>
         </div>
       </div>
+
+      <!-- 异常处理 -->
+      <div v-if="activeTab === 'exceptions'">
+        <div class="flex items-center justify-between mb-6">
+          <h2 class="text-lg font-bold text-gray-800">
+            异常物资包 ({{ store.exceptionPacks.length }})
+          </h2>
+        </div>
+
+        <div v-if="store.exceptionPacks.length === 0" class="bg-white rounded-xl p-12 text-center">
+          <div class="text-5xl mb-4">✅</div>
+          <p class="text-gray-500 mb-4">暂无异常物资包</p>
+          <p class="text-gray-400 text-sm">所有物资包状态正常</p>
+        </div>
+
+        <div v-else class="bg-white rounded-xl shadow-sm overflow-hidden">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>物资包名称</th>
+                <th>异常类型</th>
+                <th>处理优先级</th>
+                <th>当前状态</th>
+                <th>处理人员</th>
+                <th>异常备注</th>
+                <th class="w-44">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="pack in store.exceptionPacks" :key="pack.id" class="bg-amber-50/50">
+                <td class="font-medium text-gray-800">{{ pack.name }}</td>
+                <td>
+                  <span :class="['tag', getExceptionTypeColor(pack.exception?.type)]">
+                    {{ getExceptionTypeLabel(pack.exception?.type || null) }}
+                  </span>
+                </td>
+                <td>
+                  <span :class="['tag', getExceptionPriorityColor(pack.exception?.priority || 3)]">
+                    {{ getExceptionPriorityLabel(pack.exception?.priority || 3) }}
+                  </span>
+                </td>
+                <td>
+                  <span :class="['tag', getExceptionStatusColor(pack.exception?.status)]">
+                    {{ getExceptionStatusLabel(pack.exception?.status || null) }}
+                  </span>
+                </td>
+                <td>{{ pack.exception?.handler || '未分配' }}</td>
+                <td class="text-sm text-gray-600 max-w-xs truncate">{{ pack.exception?.remark || '-' }}</td>
+                <td>
+                  <div class="flex items-center gap-2">
+                    <button
+                      @click="openAddException(pack.id)"
+                      class="text-primary-600 hover:text-primary-700 text-sm font-medium"
+                    >
+                      修改
+                    </button>
+                    <button
+                      @click="removeException(pack.id)"
+                      class="text-red-500 hover:text-red-600 text-sm font-medium"
+                    >
+                      清除
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div v-if="store.resolvedExceptionPacks.length > 0" class="mt-8">
+          <h3 class="text-md font-bold text-gray-700 mb-4">已解决的异常 ({{ store.resolvedExceptionPacks.length }})</h3>
+          <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>物资包名称</th>
+                  <th>异常类型</th>
+                  <th>处理结果</th>
+                  <th>处理人员</th>
+                  <th class="w-32">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="pack in store.resolvedExceptionPacks" :key="pack.id">
+                  <td class="font-medium text-gray-800">{{ pack.name }}</td>
+                  <td>
+                    <span :class="['tag', getExceptionTypeColor(pack.exception?.type)]">
+                      {{ getExceptionTypeLabel(pack.exception?.type || null) }}
+                    </span>
+                  </td>
+                  <td class="text-sm text-gray-600 max-w-xs truncate">{{ pack.exception?.result || '-' }}</td>
+                  <td>{{ pack.exception?.handler || '-' }}</td>
+                  <td>
+                    <button
+                      @click="removeException(pack.id)"
+                      class="text-red-500 hover:text-red-600 text-sm font-medium"
+                    >
+                      清除记录
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </main>
 
     <!-- 物资包弹窗 -->
@@ -498,6 +663,47 @@ function getAreaName(id: string) {
       <template #footer>
         <button @click="showAreaModal = false" class="btn btn-outline">取消</button>
         <button @click="saveArea" class="btn btn-primary">保存</button>
+      </template>
+    </Modal>
+
+    <!-- 异常登记弹窗 -->
+    <Modal v-model:visible="showExceptionModal" :title="exceptionPackId && store.materialPacks.find(p => p.id === exceptionPackId)?.exception ? '修改异常记录' : '登记异常'">
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">物资包</label>
+          <div class="input bg-gray-50">
+            {{ store.materialPacks.find(p => p.id === exceptionPackId)?.name || '-' }}
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">异常类型</label>
+          <select v-model="exceptionForm.type" class="select">
+            <option value="shortage">缺货</option>
+            <option value="incomplete">信息不完整</option>
+            <option value="area_pending">配送区域待确认</option>
+            <option value="cancelled">临时取消发放</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">处理优先级</label>
+          <select v-model.number="exceptionForm.priority" class="select">
+            <option :value="1">紧急</option>
+            <option :value="2">高</option>
+            <option :value="3">普通</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">异常备注</label>
+          <textarea
+            v-model="exceptionForm.remark"
+            class="input min-h-[100px]"
+            placeholder="请详细描述异常情况..."
+          />
+        </div>
+      </div>
+      <template #footer>
+        <button @click="showExceptionModal = false" class="btn btn-outline">取消</button>
+        <button @click="saveException" class="btn btn-primary">保存</button>
       </template>
     </Modal>
   </div>

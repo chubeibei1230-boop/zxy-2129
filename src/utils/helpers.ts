@@ -69,6 +69,62 @@ export async function readJSONFile(file: File): Promise<any> {
   });
 }
 
+export function getExceptionTypeLabel(type: string | null): string {
+  const labels: Record<string, string> = {
+    shortage: '缺货',
+    incomplete: '信息不完整',
+    area_pending: '配送区域待确认',
+    cancelled: '临时取消发放',
+  };
+  return labels[type || ''] || '无异常';
+}
+
+export function getExceptionTypeColor(type: string | null): string {
+  const colors: Record<string, string> = {
+    shortage: 'bg-red-100 text-red-800',
+    incomplete: 'bg-amber-100 text-amber-800',
+    area_pending: 'bg-blue-100 text-blue-800',
+    cancelled: 'bg-gray-100 text-gray-800',
+  };
+  return colors[type || ''] || 'bg-gray-100 text-gray-800';
+}
+
+export function getExceptionStatusLabel(status: string | null): string {
+  const labels: Record<string, string> = {
+    pending: '待处理',
+    processing: '处理中',
+    resolved: '已解决',
+  };
+  return labels[status || ''] || '无异常';
+}
+
+export function getExceptionStatusColor(status: string | null): string {
+  const colors: Record<string, string> = {
+    pending: 'bg-orange-100 text-orange-800',
+    processing: 'bg-blue-100 text-blue-800',
+    resolved: 'bg-green-100 text-green-800',
+  };
+  return colors[status || ''] || 'bg-gray-100 text-gray-800';
+}
+
+export function getExceptionPriorityLabel(priority: number): string {
+  const labels: Record<number, string> = {
+    1: '紧急',
+    2: '高',
+    3: '普通',
+  };
+  return labels[priority] || '普通';
+}
+
+export function getExceptionPriorityColor(priority: number): string {
+  const colors: Record<number, string> = {
+    1: 'bg-red-100 text-red-800',
+    2: 'bg-orange-100 text-orange-800',
+    3: 'bg-yellow-100 text-yellow-800',
+  };
+  return colors[priority] || 'bg-yellow-100 text-yellow-800';
+}
+
 export function debounce<T extends (...args: any[]) => any>(
   func: T,
   wait: number

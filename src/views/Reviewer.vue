@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue';
 import PageHeader from '@/components/PageHeader.vue';
 import { useMaterialStore } from '@/stores/material';
-import { formatDateTime, getPriorityLabel, getPriorityColor } from '@/utils/helpers';
+import { formatDateTime, getPriorityLabel, getPriorityColor, getExceptionTypeLabel, getExceptionTypeColor, getExceptionStatusLabel, getExceptionStatusColor } from '@/utils/helpers';
 import type { MaterialPack, Batch } from '@/types';
 
 const store = useMaterialStore();
@@ -40,6 +40,10 @@ const reviewedCount = computed(() => {
 });
 
 const totalCount = computed(() => store.materialPacks.length);
+
+const exceptionCount = computed(() => store.exceptionPacks.length);
+
+const resolvedExceptionCount = computed(() => store.resolvedExceptionPacks.length);
 
 function getAreaName(id: string) {
   return store.areaMap.get(id)?.name || '未分配';
@@ -87,7 +91,7 @@ function printNow() {
 
     <main class="max-w-7xl mx-auto px-6 py-8">
       <!-- 统计概览 -->
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8 no-print">
+      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8 no-print">
         <div class="bg-white rounded-xl shadow-sm p-5">
           <div class="text-3xl font-bold text-gray-800">{{ totalCount }}</div>
           <div class="text-sm text-gray-500 mt-1">物资包总数</div>
@@ -103,6 +107,14 @@ function printNow() {
         <div class="bg-white rounded-xl shadow-sm p-5">
           <div class="text-3xl font-bold text-accent-600">{{ batchesWithPacks.length }}</div>
           <div class="text-sm text-gray-500 mt-1">配送批次</div>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm p-5">
+          <div class="text-3xl font-bold text-amber-600">{{ exceptionCount }}</div>
+          <div class="text-sm text-gray-500 mt-1">待处理异常</div>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm p-5">
+          <div class="text-3xl font-bold text-green-600">{{ resolvedExceptionCount }}</div>
+          <div class="text-sm text-gray-500 mt-1">已解决异常</div>
         </div>
       </div>
 
@@ -165,17 +177,22 @@ function printNow() {
                   <th class="w-16 text-center">序号</th>
                   <th class="w-24 text-center">勾选</th>
                   <th>物资包名称</th>
-                  <th class="w-32">配送区域</th>
+                  <th class="w-28">配送区域</th>
                   <th class="w-24">优先级</th>
-                  <th>包含物品</th>
-                  <th class="w-32">复核状态</th>
+                  <th class="w-32">异常类型</th>
+                  <th class="w-28">异常状态</th>
+                  <th>异常备注/处理结果</th>
+                  <th class="w-28">复核状态</th>
                 </tr>
               </thead>
               <tbody>
                 <tr
                   v-for="(pack, idx) in batch.packs"
                   :key="pack.id"
-                  :class="pack.reviewed ? 'bg-primary-50/50' : ''"
+                  :class="[
+                    pack.reviewed ? 'bg-primary-50/50' : '',
+                    pack.exception ? 'bg-amber-50/30' : '',
+                  ]"
                 >
                   <td class="text-center font-medium">{{ idx + 1 }}</td>
                   <td class="text-center">
@@ -194,14 +211,30 @@ function printNow() {
                     </span>
                   </td>
                   <td>
-                    <div class="flex flex-wrap gap-1">
-                      <span v-for="(item, i) in pack.items.slice(0, 2)" :key="i" class="tag tag-gray text-xs">
-                        {{ item }}
-                      </span>
-                      <span v-if="pack.items.length > 2" class="text-gray-400 text-xs">
-                        +{{ pack.items.length - 2 }}
-                      </span>
-                    </div>
+                    <span v-if="pack.exception" :class="['tag', getExceptionTypeColor(pack.exception.type)]">
+                      {{ getExceptionTypeLabel(pack.exception.type) }}
+                    </span>
+                    <span v-else class="text-gray-400 text-sm">-</span>
+                  </td>
+                  <td>
+                    <span v-if="pack.exception" :class="['tag', getExceptionStatusColor(pack.exception.status)]">
+                      {{ getExceptionStatusLabel(pack.exception.status) }}
+                    </span>
+                    <span v-else class="text-gray-400 text-sm">正常</span>
+                  </td>
+                  <td class="text-sm text-gray-600 max-w-xs">
+                    <template v-if="pack.exception">
+                      <div v-if="pack.exception.result" class="text-green-700">
+                        ✓ {{ pack.exception.result }}
+                      </div>
+                      <div v-else class="text-amber-700">
+                        {{ pack.exception.remark }}
+                      </div>
+                      <div v-if="pack.exception.handler" class="text-xs text-gray-400 mt-1">
+                        处理人: {{ pack.exception.handler }}
+                      </div>
+                    </template>
+                    <span v-else class="text-gray-400">-</span>
                   </td>
                   <td>
                     <span v-if="pack.reviewed" class="tag tag-primary">
@@ -221,10 +254,11 @@ function printNow() {
             <table class="w-full border-collapse border border-gray-400 text-sm">
               <thead>
                 <tr class="bg-gray-100">
-                  <th class="border border-gray-400 px-3 py-2 text-center w-12">序号</th>
-                  <th class="border border-gray-400 px-3 py-2 text-center w-12">勾选</th>
+                  <th class="border border-gray-400 px-3 py-2 text-center w-10">序号</th>
+                  <th class="border border-gray-400 px-3 py-2 text-center w-10">勾选</th>
                   <th class="border border-gray-400 px-3 py-2 text-left">物资包名称</th>
-                  <th class="border border-gray-400 px-3 py-2 text-left w-24">区域</th>
+                  <th class="border border-gray-400 px-3 py-2 text-left w-20">区域</th>
+                  <th class="border border-gray-400 px-3 py-2 text-left w-24">异常情况</th>
                   <th class="border border-gray-400 px-3 py-2 text-left">包含物品</th>
                   <th class="border border-gray-400 px-3 py-2 text-center w-28">复核签字</th>
                 </tr>
@@ -237,6 +271,13 @@ function printNow() {
                   </td>
                   <td class="border border-gray-400 px-3 py-2">{{ pack.name }}</td>
                   <td class="border border-gray-400 px-3 py-2">{{ getAreaName(pack.areaId) }}</td>
+                  <td class="border border-gray-400 px-3 py-2 text-xs">
+                    <template v-if="pack.exception">
+                      <div class="font-medium">{{ getExceptionTypeLabel(pack.exception.type) }}</div>
+                      <div class="text-gray-600">{{ pack.exception.result || pack.exception.remark }}</div>
+                    </template>
+                    <span v-else class="text-gray-400">-</span>
+                  </td>
                   <td class="border border-gray-400 px-3 py-2 text-xs">
                     {{ pack.items.join('、') }}
                   </td>

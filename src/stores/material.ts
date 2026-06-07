@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import type { MaterialPack, Batch, Area, UserRole, ExportData } from '@/types';
+import type { MaterialPack, Batch, Area, UserRole, ExportData, ExceptionRecord, ExceptionType, ExceptionStatus } from '@/types';
 import {
   getAllMaterialPacks,
   addMaterialPack,
@@ -94,8 +94,8 @@ export const useMaterialStore = defineStore('material', () => {
 
     const demoPacks: MaterialPack[] = [
       { id: 'pack-1', name: '爱心物资包A', items: ['大米10kg', '食用油5L', '面条2kg'], priority: 1, batchId: 'batch-1', areaId: 'area-1', order: 0, reviewed: false, createdAt: now, updatedAt: now },
-      { id: 'pack-2', name: '爱心物资包B', items: ['牛奶2箱', '面包1箱', '饼干2包'], priority: 2, batchId: 'batch-1', areaId: 'area-2', order: 1, reviewed: false, createdAt: now, updatedAt: now },
-      { id: 'pack-3', name: '爱心物资包C', items: ['洗衣粉', '香皂', '毛巾'], priority: 3, batchId: 'batch-1', areaId: 'area-1', order: 2, reviewed: false, createdAt: now, updatedAt: now },
+      { id: 'pack-2', name: '爱心物资包B', items: ['牛奶2箱', '面包1箱', '饼干2包'], priority: 2, batchId: 'batch-1', areaId: 'area-2', order: 1, reviewed: false, exception: { type: 'shortage', priority: 1, remark: '牛奶库存不足，需补充采购', status: 'pending', createdAt: now, updatedAt: now }, createdAt: now, updatedAt: now },
+      { id: 'pack-3', name: '爱心物资包C', items: ['洗衣粉', '香皂', '毛巾'], priority: 3, batchId: 'batch-1', areaId: 'area-1', order: 2, reviewed: false, exception: { type: 'area_pending', priority: 2, remark: '该区域具体配送地址待确认', status: 'processing', handler: '张执行', createdAt: now, updatedAt: now }, createdAt: now, updatedAt: now },
       { id: 'pack-4', name: '爱心物资包A', items: ['大米10kg', '食用油5L', '面条2kg'], priority: 1, batchId: 'batch-2', areaId: 'area-3', order: 3, reviewed: false, createdAt: now, updatedAt: now },
       { id: 'pack-5', name: '爱心物资包B', items: ['牛奶2箱', '面包1箱', '饼干2包'], priority: 2, batchId: 'batch-2', areaId: 'area-4', order: 4, reviewed: false, createdAt: now, updatedAt: now },
       { id: 'pack-6', name: '爱心物资包C', items: ['洗衣粉', '香皂', '毛巾'], priority: 3, batchId: 'batch-3', areaId: 'area-2', order: 5, reviewed: false, createdAt: now, updatedAt: now },
@@ -247,6 +247,62 @@ export const useMaterialStore = defineStore('material', () => {
     });
   }
 
+  // 异常处理操作
+  async function setException(packId: string, data: {
+    type: ExceptionType;
+    priority: number;
+    remark: string;
+  }) {
+    const now = new Date().toISOString();
+    const exception: ExceptionRecord = {
+      type: data.type,
+      priority: data.priority,
+      remark: data.remark,
+      status: 'pending',
+      createdAt: now,
+      updatedAt: now,
+    };
+    await updateMaterialPackData(packId, { exception });
+  }
+
+  async function updateExceptionStatus(packId: string, status: ExceptionStatus, handler?: string) {
+    const pack = materialPacks.value.find(p => p.id === packId);
+    if (!pack?.exception) return;
+
+    const exception: ExceptionRecord = {
+      ...pack.exception,
+      status,
+      handler: handler || pack.exception.handler,
+      updatedAt: new Date().toISOString(),
+    };
+    await updateMaterialPackData(packId, { exception });
+  }
+
+  async function updateExceptionResult(packId: string, result: string) {
+    const pack = materialPacks.value.find(p => p.id === packId);
+    if (!pack?.exception) return;
+
+    const exception: ExceptionRecord = {
+      ...pack.exception,
+      result,
+      status: 'resolved',
+      updatedAt: new Date().toISOString(),
+    };
+    await updateMaterialPackData(packId, { exception });
+  }
+
+  async function clearException(packId: string) {
+    await updateMaterialPackData(packId, { exception: null });
+  }
+
+  const exceptionPacks = computed(() => {
+    return materialPacks.value.filter(p => p.exception && p.exception.status !== 'resolved');
+  });
+
+  const resolvedExceptionPacks = computed(() => {
+    return materialPacks.value.filter(p => p.exception && p.exception.status === 'resolved');
+  });
+
   // 导出
   async function exportDraft() {
     const data = await exportAllData();
@@ -309,6 +365,8 @@ export const useMaterialStore = defineStore('material', () => {
     batchMap,
     areaMap,
     materialPacksByBatch,
+    exceptionPacks,
+    resolvedExceptionPacks,
     init,
     setRole,
     createMaterialPack,
@@ -323,6 +381,10 @@ export const useMaterialStore = defineStore('material', () => {
     updateAreaData,
     removeArea,
     toggleReview,
+    setException,
+    updateExceptionStatus,
+    updateExceptionResult,
+    clearException,
     exportDraft,
     importDraft,
     sortByPriority,

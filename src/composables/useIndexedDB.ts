@@ -2,7 +2,7 @@ import { openDB, IDBPDatabase } from 'idb';
 import type { MaterialPack, Batch, Area } from '@/types';
 
 const DB_NAME = 'charity-material-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export interface DBSchema {
   materialPacks: {

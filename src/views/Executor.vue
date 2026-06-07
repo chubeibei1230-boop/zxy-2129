@@ -2,8 +2,9 @@
 import { ref, computed, onUnmounted } from 'vue';
 import PageHeader from '@/components/PageHeader.vue';
 import { useMaterialStore } from '@/stores/material';
-import { getPriorityLabel, getPriorityColor } from '@/utils/helpers';
+import { getPriorityLabel, getPriorityColor, getExceptionTypeLabel, getExceptionTypeColor, getExceptionStatusLabel, getExceptionStatusColor, getExceptionPriorityLabel, formatDateTime } from '@/utils/helpers';
 import type { MaterialPack } from '@/types';
+import Modal from '@/components/Modal.vue';
 
 const store = useMaterialStore();
 
@@ -19,6 +20,12 @@ const touchCurrentPos = ref({ x: 0, y: 0 });
 const isTouchDragging = ref(false);
 const touchGhostEl = ref<HTMLElement | null>(null);
 const cardRefs = ref<HTMLElement[]>([]);
+
+const showExceptionModal = ref(false);
+const selectedExceptionPack = ref<MaterialPack | null>(null);
+const handlerName = ref('');
+const resultText = ref('');
+const showHandlerInput = ref(false);
 
 const filteredPacks = computed(() => {
   let packs = [...store.materialPacks];
@@ -219,6 +226,61 @@ function isDragOver(pack: MaterialPack): boolean {
   }
   return false;
 }
+
+function openExceptionModal(pack: MaterialPack) {
+  selectedExceptionPack.value = pack;
+  resultText.value = pack.exception?.result || '';
+  showHandlerInput.value = false;
+  showExceptionModal.value = true;
+}
+
+async function handleStartProcessing() {
+  if (!selectedExceptionPack.value) return;
+  if (!handlerName.value.trim()) {
+    showHandlerInput.value = true;
+    return;
+  }
+  await store.updateExceptionStatus(
+    selectedExceptionPack.value.id,
+    'processing',
+    handlerName.value.trim()
+  );
+  showHandlerInput.value = false;
+}
+
+function confirmStartProcessing() {
+  if (handlerName.value.trim() && selectedExceptionPack.value) {
+    store.updateExceptionStatus(
+      selectedExceptionPack.value.id,
+      'processing',
+      handlerName.value.trim()
+    );
+    showHandlerInput.value = false;
+  }
+}
+
+async function handleResolveException() {
+  if (!selectedExceptionPack.value || !resultText.value.trim()) return;
+  await store.updateExceptionResult(
+    selectedExceptionPack.value.id,
+    resultText.value.trim()
+  );
+  showExceptionModal.value = false;
+}
+
+async function handleDeferException() {
+  if (!selectedExceptionPack.value) return;
+  if (!handlerName.value.trim()) {
+    showHandlerInput.value = true;
+    return;
+  }
+  await store.updateExceptionStatus(
+    selectedExceptionPack.value.id,
+    'pending',
+    handlerName.value.trim()
+  );
+  showExceptionModal.value = false;
+}
 </script>
 
 <template>
@@ -301,7 +363,8 @@ function isDragOver(pack: MaterialPack): boolean {
           @touchmove="onTouchMove($event)"
           @touchend="onTouchEnd"
           :class="[
-            'bg-white rounded-xl shadow-sm p-5 cursor-grab active:cursor-grabbing transition-all duration-200 relative group select-none touch-none',
+            'rounded-xl shadow-sm p-5 cursor-grab active:cursor-grabbing transition-all duration-200 relative group select-none touch-none',
+            pack.exception ? 'bg-amber-50 border-2 border-amber-300' : 'bg-white',
             isDragging(pack) ? 'opacity-50 scale-105 shadow-lg z-10' : '',
             isDragOver(pack) ? 'ring-2 ring-primary-500 ring-offset-2' : '',
             'hover:shadow-md',
@@ -309,6 +372,12 @@ function isDragOver(pack: MaterialPack): boolean {
         >
           <div class="absolute -top-2 -left-2 w-8 h-8 bg-primary-600 text-white rounded-full flex items-center justify-center text-sm font-bold shadow-md">
             {{ store.materialPacks.findIndex((p: MaterialPack) => p.id === pack.id) + 1 }}
+          </div>
+
+          <div v-if="pack.exception" class="absolute -top-2 -right-2">
+            <span :class="['tag', getExceptionStatusColor(pack.exception.status), 'shadow-md']">
+              ⚠️ {{ getExceptionStatusLabel(pack.exception.status) }}
+            </span>
           </div>
 
           <div class="absolute top-3 right-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -320,7 +389,7 @@ function isDragOver(pack: MaterialPack): boolean {
           <div class="pt-4">
             <h3 class="font-bold text-gray-800 text-lg mb-3">{{ pack.name }}</h3>
             
-            <div class="flex flex-wrap gap-2 mb-4">
+            <div class="flex flex-wrap gap-2 mb-3">
               <span class="tag tag-info">{{ getBatchName(pack.batchId) }}</span>
               <span class="tag tag-accent">{{ getAreaName(pack.areaId) }}</span>
               <span :class="['tag', getPriorityColor(pack.priority)]">
@@ -328,17 +397,38 @@ function isDragOver(pack: MaterialPack): boolean {
               </span>
             </div>
 
+            <div v-if="pack.exception" class="mb-3 p-3 bg-white/70 rounded-lg border border-amber-200">
+              <div class="flex items-center gap-2 mb-2">
+                <span :class="['tag text-xs', getExceptionTypeColor(pack.exception.type)]">
+                  {{ getExceptionTypeLabel(pack.exception.type) }}
+                </span>
+                <span :class="['tag text-xs', getExceptionPriorityColor(pack.exception.priority)]">
+                  {{ getExceptionPriorityLabel(pack.exception.priority) }}
+                </span>
+              </div>
+              <p class="text-xs text-gray-600 line-clamp-2">{{ pack.exception.remark }}</p>
+            </div>
+
             <div class="border-t border-gray-100 pt-3">
               <p class="text-xs text-gray-500 mb-2">包含物品:</p>
               <ul class="text-sm text-gray-600 space-y-1">
-                <li v-for="(item, idx) in pack.items.slice(0, 4)" :key="idx" class="flex items-center gap-2">
+                <li v-for="(item, idx) in pack.items.slice(0, 3)" :key="idx" class="flex items-center gap-2">
                   <span class="w-1.5 h-1.5 bg-primary-500 rounded-full" />
                   {{ item }}
                 </li>
-                <li v-if="pack.items.length > 4" class="text-gray-400">
-                  还有 {{ pack.items.length - 4 }} 项物品...
+                <li v-if="pack.items.length > 3" class="text-gray-400">
+                  还有 {{ pack.items.length - 3 }} 项物品...
                 </li>
               </ul>
+            </div>
+
+            <div v-if="pack.exception" class="mt-3 pt-3 border-t border-gray-100">
+              <button
+                @click.stop="openExceptionModal(pack)"
+                class="w-full btn btn-outline text-sm py-1.5"
+              >
+                处理异常
+              </button>
             </div>
           </div>
         </div>
@@ -358,5 +448,116 @@ function isDragOver(pack: MaterialPack): boolean {
         </div>
       </div>
     </main>
+
+    <!-- 异常处理弹窗 -->
+    <Modal v-model:visible="showExceptionModal" title="处理异常">
+      <div v-if="selectedExceptionPack" class="space-y-4">
+        <div class="bg-amber-50 border border-amber-200 rounded-lg p-4">
+          <h4 class="font-bold text-gray-800 mb-2">{{ selectedExceptionPack.name }}</h4>
+          <div class="flex flex-wrap gap-2 mb-3">
+            <span :class="['tag', getExceptionTypeColor(selectedExceptionPack.exception?.type)]">
+              {{ getExceptionTypeLabel(selectedExceptionPack.exception?.type || null) }}
+            </span>
+            <span :class="['tag', getExceptionStatusColor(selectedExceptionPack.exception?.status)]">
+              {{ getExceptionStatusLabel(selectedExceptionPack.exception?.status || null) }}
+            </span>
+          </div>
+          <p class="text-sm text-gray-600">{{ selectedExceptionPack.exception?.remark }}</p>
+          <div class="mt-3 text-xs text-gray-500">
+            <p>登记时间: {{ formatDateTime(selectedExceptionPack.exception?.createdAt || '') }}</p>
+            <p v-if="selectedExceptionPack.exception?.handler">处理人员: {{ selectedExceptionPack.exception.handler }}</p>
+          </div>
+        </div>
+
+        <div v-if="selectedExceptionPack.exception?.result">
+          <label class="block text-sm font-medium text-gray-700 mb-1">处理结果</label>
+          <div class="input bg-green-50 border-green-200 text-green-800">
+            {{ selectedExceptionPack.exception.result }}
+          </div>
+        </div>
+
+        <div v-else-if="selectedExceptionPack.exception?.status === 'resolved'">
+          <div class="text-center py-4 text-green-600">
+            <span class="text-4xl">✅</span>
+            <p class="mt-2 font-medium">该异常已解决</p>
+          </div>
+        </div>
+
+        <div v-else>
+          <label class="block text-sm font-medium text-gray-700 mb-1">处理结果</label>
+          <textarea
+            v-model="resultText"
+            class="input min-h-[100px]"
+            placeholder="请填写处理结果..."
+          />
+        </div>
+      </div>
+      <template #footer>
+        <button @click="showExceptionModal = false" class="btn btn-outline">关闭</button>
+        <template v-if="selectedExceptionPack && selectedExceptionPack.exception?.status !== 'resolved'">
+          <button
+            v-if="selectedExceptionPack.exception?.status === 'pending'"
+            @click="handleStartProcessing"
+            class="btn btn-outline text-blue-600"
+          >
+            开始处理
+          </button>
+          <button
+            v-if="selectedExceptionPack.exception?.status === 'processing'"
+            @click="handleDeferException"
+            class="btn btn-outline text-gray-600"
+          >
+            暂缓处理
+          </button>
+          <button
+            @click="handleResolveException"
+            :disabled="!resultText.trim()"
+            class="btn btn-primary"
+          >
+            标记已解决
+          </button>
+        </template>
+      </template>
+    </Modal>
+
+    <!-- 处理人员输入弹窗 -->
+    <Teleport to="body">
+      <Transition name="modal">
+        <div v-if="showHandlerInput" class="modal-overlay" @click.self="showHandlerInput = false">
+          <div class="modal-content animate-slide-up max-w-sm">
+            <div class="p-6">
+              <h3 class="text-lg font-bold text-gray-800 mb-4">输入处理人员姓名</h3>
+              <input
+                v-model="handlerName"
+                type="text"
+                class="input"
+                placeholder="请输入您的姓名"
+                @keyup.enter="confirmStartProcessing"
+              />
+            </div>
+            <div class="flex items-center justify-end gap-3 p-6 pt-0">
+              <button @click="showHandlerInput = false" class="btn btn-outline">
+                取消
+              </button>
+              <button @click="confirmStartProcessing" class="btn btn-primary">
+                确认
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
+
+<style scoped>
+.modal-enter-active,
+.modal-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+}
+</style>

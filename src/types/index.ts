@@ -1,3 +1,18 @@
+export type ExceptionType = 'shortage' | 'incomplete' | 'area_pending' | 'cancelled' | null;
+
+export type ExceptionStatus = 'pending' | 'processing' | 'resolved' | null;
+
+export interface ExceptionRecord {
+  type: ExceptionType;
+  priority: number;
+  remark: string;
+  status: ExceptionStatus;
+  handler?: string;
+  result?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface MaterialPack {
   id: string;
   name: string;
@@ -9,6 +24,7 @@ export interface MaterialPack {
   reviewed: boolean;
   reviewer?: string;
   reviewTime?: string;
+  exception?: ExceptionRecord | null;
   createdAt: string;
   updatedAt: string;
 }

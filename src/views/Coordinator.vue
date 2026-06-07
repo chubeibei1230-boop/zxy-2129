@@ -83,8 +83,15 @@ function openAddPack() {
   showPackModal.value = true;
 }
 
+const originalBatchId = ref<string>('');
+
 function openEditPack(pack: MaterialPack) {
+  if (isBatchCompleted(pack.batchId)) {
+    alert('该物资包所属批次已完成，无法编辑');
+    return;
+  }
   editingId.value = pack.id;
+  originalBatchId.value = pack.batchId;
   packForm.name = pack.name;
   packForm.items = pack.items.join('\n');
   packForm.priority = pack.priority;
@@ -97,6 +104,14 @@ async function savePack() {
   const items = packForm.items.split('\n').filter(i => i.trim());
   
   if (editingId.value) {
+    if (isBatchCompleted(originalBatchId.value)) {
+      alert('原所属批次已完成，无法修改物资包信息');
+      return;
+    }
+    if (isBatchCompleted(packForm.batchId)) {
+      alert('目标批次已完成，无法将物资包移入该批次');
+      return;
+    }
     await store.updateMaterialPackData(editingId.value, {
       name: packForm.name,
       items,
@@ -105,6 +120,10 @@ async function savePack() {
       areaId: packForm.areaId,
     });
   } else {
+    if (isBatchCompleted(packForm.batchId)) {
+      alert('目标批次已完成，无法向该批次添加物资包');
+      return;
+    }
     await store.createMaterialPack({
       name: packForm.name,
       items,
@@ -419,91 +438,128 @@ function getAreaName(id: string) {
           <button @click="openAddBatch" class="btn btn-primary">添加第一个批次</button>
         </div>
 
-        <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <div v-for="batch in store.batches" :key="batch.id" :class="['card', batch.status === 'completed' ? 'border-2 border-green-300 bg-green-50/30' : '']">
-            <div class="flex items-start justify-between">
-              <div class="flex-1">
-                <div class="flex items-center gap-2 mb-2">
-                  <h3 class="font-bold text-gray-800 text-lg">{{ batch.name }}</h3>
+        <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div v-for="batch in store.batches" :key="batch.id" :class="['card p-5', batch.status === 'completed' ? 'border-2 border-green-300 bg-green-50/30' : batch.status === 'pending_review' ? 'border-2 border-amber-300 bg-amber-50/30' : 'border-2 border-blue-200 bg-blue-50/20']">
+            <div class="flex items-start justify-between mb-4">
+              <div>
+                <div class="flex items-center gap-2 mb-1">
+                  <h3 class="font-bold text-gray-800 text-xl">{{ batch.name }}</h3>
                   <span :class="['tag', getBatchStatusColor(batch.status)]">
                     {{ getBatchStatusIcon(batch.status) }} {{ getBatchStatusLabel(batch.status) }}
                   </span>
                 </div>
                 <p class="text-gray-500 text-sm">
                   <span class="mr-1">⏰</span>配送时间: {{ batch.deliveryTime || '未设置' }}
-                </p>
-                <p v-if="batch.status === 'completed' && batch.completedAt" class="text-gray-500 text-sm mt-1">
-                  <span class="mr-1">✅</span>完成时间: {{ formatDateTime(batch.completedAt) }}
-                </p>
-                <p v-if="batch.status === 'completed' && batch.closedBy" class="text-gray-500 text-sm">
-                  <span class="mr-1">👤</span>闭环人: {{ batch.closedBy }}
-                </p>
-                
-                <div class="mt-3 space-y-2">
+                  <span class="mx-2">|</span>
                   <span :class="['tag', getPriorityColor(batch.priority)]">
                     优先级: {{ getPriorityLabel(batch.priority) }}
                   </span>
-                  
-                  <div class="flex flex-wrap gap-2 mt-2">
-                    <span class="tag tag-gray text-xs">
-                      📦 共 {{ getBatchStats(batch.id).total }} 个
-                    </span>
-                    <span class="tag tag-primary text-xs">
-                      ✅ 已复核 {{ getBatchStats(batch.id).reviewed }}
-                    </span>
-                    <span v-if="getBatchStats(batch.id).unresolvedExceptions > 0" class="tag bg-red-100 text-red-800 text-xs">
-                      ⚠️ 异常 {{ getBatchStats(batch.id).unresolvedExceptions }}
-                    </span>
-                  </div>
-                  
-                  <div class="mt-3">
-                    <div class="flex items-center justify-between text-xs text-gray-500 mb-1">
-                      <span>复核进度</span>
-                      <span>{{ getBatchStats(batch.id).total > 0 ? Math.round(getBatchStats(batch.id).reviewed / getBatchStats(batch.id).total * 100) : 0 }}%</span>
-                    </div>
-                    <div class="w-full bg-gray-200 rounded-full h-2">
-                      <div 
-                        class="bg-primary-600 h-2 rounded-full transition-all" 
-                        :style="{ width: `${getBatchStats(batch.id).total > 0 ? getBatchStats(batch.id).reviewed / getBatchStats(batch.id).total * 100 : 0}%` }"
-                      ></div>
-                    </div>
-                  </div>
-                </div>
+                </p>
+                <p v-if="batch.status === 'completed' && batch.completedAt" class="text-green-600 text-sm mt-1 font-medium">
+                  <span class="mr-1">✅</span>完成时间: {{ formatDateTime(batch.completedAt) }}
+                  <span v-if="batch.closedBy" class="ml-2">
+                    <span class="mr-1">👤</span>{{ batch.closedBy }}
+                  </span>
+                </p>
               </div>
-              <div class="flex flex-col items-center gap-2 ml-3">
+              <div class="flex items-center gap-2">
                 <button
                   v-if="batch.status !== 'completed'"
                   @click="openEditBatch(batch)"
-                  class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-600"
-                  :title="'编辑'"
+                  class="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-600 transition-colors"
+                  title="编辑"
                 >
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                   </svg>
                 </button>
                 <button
                   v-if="batch.status !== 'completed'"
                   @click="deleteBatch(batch.id)"
-                  class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-red-50 text-red-500"
-                  :title="'删除'"
+                  class="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-red-50 text-red-500 transition-colors"
+                  title="删除"
                 >
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                   </svg>
                 </button>
               </div>
             </div>
+
+            <div class="flex items-center justify-between mb-4 bg-white rounded-lg p-3 shadow-sm">
+              <div class="flex items-center gap-4">
+                <div class="text-center">
+                  <div class="text-xl font-bold text-gray-800">{{ getBatchStats(batch.id).total }}</div>
+                  <div class="text-xs text-gray-500">物资包</div>
+                </div>
+                <div class="w-px h-8 bg-gray-200"></div>
+                <div class="text-center">
+                  <div class="text-xl font-bold text-green-600">{{ getBatchStats(batch.id).reviewed }}</div>
+                  <div class="text-xs text-gray-500">已复核</div>
+                </div>
+                <div class="w-px h-8 bg-gray-200"></div>
+                <div class="text-center">
+                  <div class="text-xl font-bold text-gray-400">{{ getBatchStats(batch.id).unreviewed }}</div>
+                  <div class="text-xs text-gray-500">待复核</div>
+                </div>
+                <div class="w-px h-8 bg-gray-200"></div>
+                <div class="text-center">
+                  <div :class="['text-xl font-bold', getBatchStats(batch.id).unresolvedExceptions > 0 ? 'text-red-500' : 'text-green-500']">
+                    {{ getBatchStats(batch.id).unresolvedExceptions }}
+                  </div>
+                  <div class="text-xs text-gray-500">异常</div>
+                </div>
+              </div>
+              <div class="text-right">
+                <div class="text-lg font-bold text-primary-600">
+                  {{ getBatchStats(batch.id).total > 0 ? Math.round(getBatchStats(batch.id).reviewed / getBatchStats(batch.id).total * 100) : 0 }}%
+                </div>
+                <div class="text-xs text-gray-500">复核进度</div>
+              </div>
+            </div>
+
+            <div class="relative mb-4">
+              <div class="flex items-center justify-between">
+                <div :class="['flex flex-col items-center flex-1', batch.status !== 'in_progress' ? 'text-blue-600' : 'text-blue-600']">
+                  <div :class="['w-9 h-9 rounded-full flex items-center justify-center text-white font-bold shadow-md', batch.status !== 'in_progress' ? 'bg-blue-500' : 'bg-blue-500']">
+                    1
+                  </div>
+                  <span class="text-xs font-medium mt-1">进行中</span>
+                </div>
+                <div :class="['flex-1 h-1 mx-1 rounded', batch.status !== 'in_progress' ? 'bg-blue-500' : 'bg-gray-200']"></div>
+                <div :class="['flex flex-col items-center flex-1', batch.status === 'pending_review' || batch.status === 'completed' ? 'text-amber-600' : 'text-gray-400']">
+                  <div :class="['w-9 h-9 rounded-full flex items-center justify-center text-white font-bold shadow-md', batch.status === 'pending_review' || batch.status === 'completed' ? 'bg-amber-500' : 'bg-gray-300']">
+                    2
+                  </div>
+                  <span class="text-xs font-medium mt-1">待复核</span>
+                </div>
+                <div :class="['flex-1 h-1 mx-1 rounded', batch.status === 'completed' ? 'bg-green-500' : 'bg-gray-200']"></div>
+                <div :class="['flex flex-col items-center flex-1', batch.status === 'completed' ? 'text-green-600' : 'text-gray-400']">
+                  <div :class="['w-9 h-9 rounded-full flex items-center justify-center text-white font-bold shadow-md', batch.status === 'completed' ? 'bg-green-500' : 'bg-gray-300']">
+                    3
+                  </div>
+                  <span class="text-xs font-medium mt-1">已完成</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="w-full bg-gray-200 rounded-full h-2 mb-4">
+              <div 
+                :class="['h-2 rounded-full transition-all duration-500', batch.status === 'completed' ? 'bg-green-500' : batch.status === 'pending_review' ? 'bg-amber-500' : 'bg-blue-500']" 
+                :style="{ width: `${getBatchStats(batch.id).total > 0 ? getBatchStats(batch.id).reviewed / getBatchStats(batch.id).total * 100 : 0}%` }"
+              ></div>
+            </div>
             
-            <div class="mt-4 pt-4 border-t border-gray-100">
+            <div class="pt-3 border-t border-gray-100">
               <button
                 v-if="batch.status !== 'completed'"
                 @click="openCloseBatch(batch.id)"
-                class="w-full btn btn-primary text-sm py-2"
+                :class="['w-full btn text-sm py-2.5', getBatchStats(batch.id).unreviewed === 0 && getBatchStats(batch.id).unresolvedExceptions === 0 ? 'btn-primary' : 'btn-outline']"
               >
                 <span class="mr-1">🔒</span>发起闭环确认
               </button>
-              <div v-else class="text-center text-sm text-green-600 font-medium">
-                ✅ 已正式交接完成，内容只读
+              <div v-else class="text-center text-sm text-green-600 font-medium bg-green-100 rounded-lg py-2.5">
+                ✅ 已正式交接完成 · 内容只读
               </div>
             </div>
           </div>
@@ -575,6 +631,7 @@ function getAreaName(id: string) {
             <thead>
               <tr>
                 <th>物资包名称</th>
+                <th>所属批次</th>
                 <th>异常类型</th>
                 <th>处理优先级</th>
                 <th>当前状态</th>
@@ -584,8 +641,14 @@ function getAreaName(id: string) {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="pack in store.exceptionPacks" :key="pack.id" class="bg-amber-50/50">
+              <tr v-for="pack in store.exceptionPacks" :key="pack.id" :class="['bg-amber-50/50', isBatchCompleted(pack.batchId) ? 'opacity-60' : '']">
                 <td class="font-medium text-gray-800">{{ pack.name }}</td>
+                <td>
+                  <span :class="['tag', isBatchCompleted(pack.batchId) ? 'bg-green-100 text-green-800' : 'tag-gray']">
+                    {{ getBatchName(pack.batchId) }}
+                    <span v-if="isBatchCompleted(pack.batchId)"> (已完成)</span>
+                  </span>
+                </td>
                 <td>
                   <span :class="['tag', getExceptionTypeColor(pack.exception?.type)]">
                     {{ getExceptionTypeLabel(pack.exception?.type || null) }}
@@ -605,18 +668,23 @@ function getAreaName(id: string) {
                 <td class="text-sm text-gray-600 max-w-xs truncate">{{ pack.exception?.remark || '-' }}</td>
                 <td>
                   <div class="flex items-center gap-2">
-                    <button
-                      @click="openAddException(pack.id)"
-                      class="text-primary-600 hover:text-primary-700 text-sm font-medium"
-                    >
-                      修改
-                    </button>
-                    <button
-                      @click="removeException(pack.id)"
-                      class="text-red-500 hover:text-red-600 text-sm font-medium"
-                    >
-                      清除
-                    </button>
+                    <template v-if="!isBatchCompleted(pack.batchId)">
+                      <button
+                        @click="openAddException(pack.id)"
+                        class="text-primary-600 hover:text-primary-700 text-sm font-medium"
+                      >
+                        修改
+                      </button>
+                      <button
+                        @click="removeException(pack.id)"
+                        class="text-red-500 hover:text-red-600 text-sm font-medium"
+                      >
+                        清除
+                      </button>
+                    </template>
+                    <span v-else class="text-gray-400 text-sm">
+                      只读
+                    </span>
                   </div>
                 </td>
               </tr>
@@ -631,6 +699,7 @@ function getAreaName(id: string) {
               <thead>
                 <tr>
                   <th>物资包名称</th>
+                  <th>所属批次</th>
                   <th>异常类型</th>
                   <th>处理结果</th>
                   <th>处理人员</th>
@@ -638,8 +707,14 @@ function getAreaName(id: string) {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="pack in store.resolvedExceptionPacks" :key="pack.id">
+                <tr v-for="pack in store.resolvedExceptionPacks" :key="pack.id" :class="isBatchCompleted(pack.batchId) ? 'bg-gray-50' : ''">
                   <td class="font-medium text-gray-800">{{ pack.name }}</td>
+                  <td>
+                    <span :class="['tag', isBatchCompleted(pack.batchId) ? 'bg-green-100 text-green-800' : 'tag-gray']">
+                      {{ getBatchName(pack.batchId) }}
+                      <span v-if="isBatchCompleted(pack.batchId)"> (已完成)</span>
+                    </span>
+                  </td>
                   <td>
                     <span :class="['tag', getExceptionTypeColor(pack.exception?.type)]">
                       {{ getExceptionTypeLabel(pack.exception?.type || null) }}
@@ -648,12 +723,17 @@ function getAreaName(id: string) {
                   <td class="text-sm text-gray-600 max-w-xs truncate">{{ pack.exception?.result || '-' }}</td>
                   <td>{{ pack.exception?.handler || '-' }}</td>
                   <td>
-                    <button
-                      @click="removeException(pack.id)"
-                      class="text-red-500 hover:text-red-600 text-sm font-medium"
-                    >
-                      清除记录
-                    </button>
+                    <template v-if="!isBatchCompleted(pack.batchId)">
+                      <button
+                        @click="removeException(pack.id)"
+                        class="text-red-500 hover:text-red-600 text-sm font-medium"
+                      >
+                        清除记录
+                      </button>
+                    </template>
+                    <span v-else class="text-gray-400 text-sm">
+                      只读
+                    </span>
                   </td>
                 </tr>
               </tbody>
@@ -693,12 +773,16 @@ function getAreaName(id: string) {
             <label class="block text-sm font-medium text-gray-700 mb-1">所属批次</label>
             <select v-model="packForm.batchId" class="select">
               <option value="" disabled>请先创建批次</option>
-              <option v-for="b in store.batches" :key="b.id" :value="b.id">
+              <option v-for="b in store.batches" :key="b.id" :value="b.id" :disabled="isBatchCompleted(b.id)">
                 {{ b.name }}
+                <span v-if="isBatchCompleted(b.id)"> (已完成)</span>
               </option>
             </select>
             <p v-if="store.batches.length === 0" class="text-xs text-amber-600 mt-1">
               ⚠️ 暂无批次，请先在"配送批次"标签页创建
+            </p>
+            <p v-if="packForm.batchId && isBatchCompleted(packForm.batchId)" class="text-xs text-red-600 mt-1">
+              ⚠️ 该批次已完成，无法选择
             </p>
           </div>
         </div>

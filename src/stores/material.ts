@@ -266,10 +266,14 @@ export const useMaterialStore = defineStore('material', () => {
 
     const stats = getBatchStats(batchId);
     
-    if (stats.total > 0 && stats.reviewed === stats.total && stats.unresolvedExceptions === 0) {
-      await updateBatchStatus(batchId, 'pending_review');
-    } else if (batch.status === 'pending_review' && (stats.unreviewed > 0 || stats.unresolvedExceptions > 0)) {
-      await updateBatchStatus(batchId, 'in_progress');
+    if (stats.total > 0 && stats.reviewed > 0) {
+      if (batch.status === 'in_progress') {
+        await updateBatchStatus(batchId, 'pending_review');
+      }
+    } else if (stats.reviewed === 0) {
+      if (batch.status === 'pending_review') {
+        await updateBatchStatus(batchId, 'in_progress');
+      }
     }
   }
 

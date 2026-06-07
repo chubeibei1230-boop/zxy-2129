@@ -152,34 +152,74 @@ function printNow() {
           :class="['print-page', batchIndex > 0 ? 'pt-8' : '']"
         >
           <!-- 批次标题 -->
-          <div :class="['flex items-center justify-between mb-4 no-print', isBatchCompleted(batch) ? 'p-4 bg-green-50 rounded-xl border border-green-200' : '']">
-            <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
-              <span class="w-8 h-8 bg-info-500 text-white rounded-lg flex items-center justify-center text-sm">
-                {{ batchIndex + 1 }}
-              </span>
-              {{ batch.name }}
-              <span :class="['tag', getBatchStatusColor(batch.status)]">
-                {{ getBatchStatusIcon(batch.status) }} {{ getBatchStatusLabel(batch.status) }}
-              </span>
-              <span class="text-sm font-normal text-gray-500">
-                ({{ batch.packs.length }} 个物资包)
-              </span>
-            </h2>
-            <div class="flex items-center gap-4">
-              <div class="text-sm text-gray-500">
-                <span class="text-primary-600 font-medium">{{ batch.stats.reviewed }}</span>
-                <span>/{{ batch.stats.total }} 已复核</span>
-                <span v-if="batch.stats.unresolvedExceptions > 0" class="ml-2 text-red-500">
-                  ⚠️ {{ batch.stats.unresolvedExceptions }} 个异常
+          <div :class="['mb-4 no-print rounded-xl p-4', isBatchCompleted(batch) ? 'bg-green-50 border-2 border-green-200' : batch.status === 'pending_review' ? 'bg-amber-50 border-2 border-amber-200' : 'bg-blue-50 border-2 border-blue-200']">
+            <div class="flex items-center justify-between mb-3">
+              <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+                <span class="w-8 h-8 bg-info-500 text-white rounded-lg flex items-center justify-center text-sm">
+                  {{ batchIndex + 1 }}
+                </span>
+                {{ batch.name }}
+                <span :class="['tag', getBatchStatusColor(batch.status)]">
+                  {{ getBatchStatusIcon(batch.status) }} {{ getBatchStatusLabel(batch.status) }}
+                </span>
+              </h2>
+              <div class="flex items-center gap-4">
+                <div class="text-sm">
+                  <span class="text-primary-600 font-bold text-lg">{{ batch.stats.reviewed }}</span>
+                  <span class="text-gray-500">/{{ batch.stats.total }} 已复核</span>
+                  <span v-if="batch.stats.unresolvedExceptions > 0" class="ml-2 text-red-500 font-medium">
+                    ⚠️ {{ batch.stats.unresolvedExceptions }} 个异常
+                  </span>
+                </div>
+                <span v-if="batch.deliveryTime" class="text-sm text-gray-500">
+                  配送时间: {{ batch.deliveryTime }}
+                </span>
+                <span v-if="isBatchCompleted(batch) && batch.completedAt" class="text-sm text-green-600 font-medium">
+                  ✅ {{ formatDateTime(batch.completedAt) }}
                 </span>
               </div>
-              <span v-if="batch.deliveryTime" class="text-sm text-gray-500">
-                配送时间: {{ batch.deliveryTime }}
-              </span>
-              <span v-if="isBatchCompleted(batch) && batch.completedAt" class="text-sm text-green-600">
-                完成时间: {{ formatDateTime(batch.completedAt) }}
-              </span>
             </div>
+
+            <div class="flex items-center justify-between mt-2">
+              <div class="flex items-center gap-2 flex-1 max-w-md">
+                <div :class="['flex flex-col items-center', batch.status !== 'in_progress' ? 'text-blue-600' : 'text-blue-600']">
+                  <div :class="['w-7 h-7 rounded-full flex items-center justify-center text-white font-bold text-xs shadow-sm', batch.status !== 'in_progress' ? 'bg-blue-500' : 'bg-blue-500']">
+                    1
+                  </div>
+                  <span class="text-xs font-medium mt-1">进行中</span>
+                </div>
+                <div :class="['flex-1 h-1 mx-2 rounded', batch.status !== 'in_progress' ? 'bg-blue-500' : 'bg-gray-300']"></div>
+                <div :class="['flex flex-col items-center', batch.status === 'pending_review' || batch.status === 'completed' ? 'text-amber-600' : 'text-gray-400']">
+                  <div :class="['w-7 h-7 rounded-full flex items-center justify-center text-white font-bold text-xs shadow-sm', batch.status === 'pending_review' || batch.status === 'completed' ? 'bg-amber-500' : 'bg-gray-300']">
+                    2
+                  </div>
+                  <span class="text-xs font-medium mt-1">待复核</span>
+                </div>
+                <div :class="['flex-1 h-1 mx-2 rounded', batch.status === 'completed' ? 'bg-green-500' : 'bg-gray-300']"></div>
+                <div :class="['flex flex-col items-center', batch.status === 'completed' ? 'text-green-600' : 'text-gray-400']">
+                  <div :class="['w-7 h-7 rounded-full flex items-center justify-center text-white font-bold text-xs shadow-sm', batch.status === 'completed' ? 'bg-green-500' : 'bg-gray-300']">
+                    3
+                  </div>
+                  <span class="text-xs font-medium mt-1">已完成</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-2 ml-4">
+                <span class="text-xs text-gray-500">复核进度</span>
+                <span class="text-sm font-bold text-primary-600">
+                  {{ batch.stats.total > 0 ? Math.round(batch.stats.reviewed / batch.stats.total * 100) : 0 }}%
+                </span>
+                <div class="w-32 bg-gray-200 rounded-full h-2">
+                  <div 
+                    :class="['h-2 rounded-full transition-all', batch.status === 'completed' ? 'bg-green-500' : batch.status === 'pending_review' ? 'bg-amber-500' : 'bg-blue-500']"
+                    :style="{ width: `${batch.stats.total > 0 ? batch.stats.reviewed / batch.stats.total * 100 : 0}%` }"
+                  ></div>
+                </div>
+              </div>
+            </div>
+
+            <p v-if="isBatchCompleted(batch)" class="text-green-700 text-xs mt-3 text-center font-medium bg-green-100 rounded-lg py-1.5">
+              🔒 该批次已正式交接完成，内容只读
+            </p>
           </div>
 
           <!-- 打印时的批次标题 -->

@@ -366,44 +366,99 @@ async function handleDeferException() {
         </div>
       </div>
 
-      <div v-if="selectedBatchInfo" :class="['rounded-xl p-4 mb-8 no-print', selectedBatchInfo.status === 'completed' ? 'bg-green-50 border border-green-200' : 'bg-primary-50 border border-primary-200']">
-        <div class="flex items-start gap-3">
-          <span class="text-2xl">{{ selectedBatchInfo.status === 'completed' ? '✅' : '💡' }}</span>
-          <div class="flex-1">
-            <div class="flex items-center gap-2 mb-2">
-              <p :class="['font-medium', selectedBatchInfo.status === 'completed' ? 'text-green-800' : 'text-primary-800']">
-                {{ selectedBatchInfo.name }} - 批次进度
-              </p>
-              <span :class="['tag', getBatchStatusColor(selectedBatchInfo.status)]">
-                {{ getBatchStatusIcon(selectedBatchInfo.status) }} {{ getBatchStatusLabel(selectedBatchInfo.status) }}
-              </span>
-            </div>
-            <div class="flex items-center gap-4 text-sm mb-2">
-              <span>
-                <span class="font-medium">{{ selectedBatchInfo.stats.reviewed }}</span>
-                <span class="text-gray-500">/{{ selectedBatchInfo.stats.total }} 已复核</span>
-              </span>
-              <span v-if="selectedBatchInfo.stats.unresolvedExceptions > 0" class="text-red-500">
-                ⚠️ {{ selectedBatchInfo.stats.unresolvedExceptions }} 个未解决异常
-              </span>
-              <span v-else class="text-green-600">
-                ✅ 无待处理异常
-              </span>
-              <span v-if="selectedBatchInfo.status === 'completed' && selectedBatchInfo.completedAt" class="text-green-600">
-                完成时间: {{ formatDateTime(selectedBatchInfo.completedAt) }}
-              </span>
-            </div>
-            <div class="w-full bg-gray-200 rounded-full h-2.5">
-              <div 
-                :class="['h-2.5 rounded-full transition-all', selectedBatchInfo.status === 'completed' ? 'bg-green-500' : 'bg-primary-600']"
-                :style="{ width: `${selectedBatchInfo.stats.total > 0 ? selectedBatchInfo.stats.reviewed / selectedBatchInfo.stats.total * 100 : 0}%` }"
-              ></div>
-            </div>
-            <p v-if="selectedBatchInfo.status === 'completed'" class="text-green-600 text-sm mt-2">
-              该批次已正式交接完成，内容只读，不可调整顺序或修改异常。
+      <div v-if="selectedBatchInfo" :class="['rounded-xl p-5 mb-8 no-print', selectedBatchInfo.status === 'completed' ? 'bg-green-50 border-2 border-green-300' : selectedBatchInfo.status === 'pending_review' ? 'bg-amber-50 border-2 border-amber-300' : 'bg-blue-50 border-2 border-blue-300']">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-2">
+            <span class="text-2xl">{{ getBatchStatusIcon(selectedBatchInfo.status) }}</span>
+            <p :class="['font-bold text-lg', selectedBatchInfo.status === 'completed' ? 'text-green-800' : selectedBatchInfo.status === 'pending_review' ? 'text-amber-800' : 'text-blue-800']">
+              {{ selectedBatchInfo.name }}
             </p>
+            <span :class="['tag', getBatchStatusColor(selectedBatchInfo.status)]">
+              {{ getBatchStatusLabel(selectedBatchInfo.status) }}
+            </span>
+          </div>
+          <span v-if="selectedBatchInfo.status === 'completed' && selectedBatchInfo.completedAt" class="text-sm text-green-600 font-medium">
+            ✅ {{ formatDateTime(selectedBatchInfo.completedAt) }} 完成
+          </span>
+        </div>
+
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-6">
+            <div class="text-center">
+              <div class="text-2xl font-bold text-gray-800">{{ selectedBatchInfo.stats.total }}</div>
+              <div class="text-xs text-gray-500">物资包总数</div>
+            </div>
+            <div class="text-center">
+              <div class="text-2xl font-bold text-primary-600">{{ selectedBatchInfo.stats.reviewed }}</div>
+              <div class="text-xs text-gray-500">已复核</div>
+            </div>
+            <div class="text-center">
+              <div class="text-2xl font-bold text-gray-400">{{ selectedBatchInfo.stats.unreviewed }}</div>
+              <div class="text-xs text-gray-500">待复核</div>
+            </div>
+            <div class="text-center">
+              <div :class="['text-2xl font-bold', selectedBatchInfo.stats.unresolvedExceptions > 0 ? 'text-red-500' : 'text-green-500']">
+                {{ selectedBatchInfo.stats.unresolvedExceptions }}
+              </div>
+              <div class="text-xs text-gray-500">未解决异常</div>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-sm text-gray-500">复核进度</span>
+            <span class="text-sm font-bold text-primary-600">
+              {{ selectedBatchInfo.stats.total > 0 ? Math.round(selectedBatchInfo.stats.reviewed / selectedBatchInfo.stats.total * 100) : 0 }}%
+            </span>
           </div>
         </div>
+
+        <div class="relative">
+          <div class="flex items-center justify-between">
+            <div :class="['flex flex-col items-center', selectedBatchInfo.status !== 'in_progress' ? 'text-blue-600' : 'text-blue-600']">
+              <div :class="['w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md', selectedBatchInfo.status !== 'in_progress' ? 'bg-blue-500' : 'bg-blue-500']">
+                1
+              </div>
+              <span class="text-xs font-medium mt-2">进行中</span>
+              <span class="text-xs text-gray-500">物资装袋</span>
+            </div>
+            
+            <div :class="['flex-1 h-1 mx-2 rounded', selectedBatchInfo.status !== 'in_progress' ? 'bg-blue-500' : 'bg-gray-200']"></div>
+            
+            <div :class="['flex flex-col items-center', selectedBatchInfo.status === 'pending_review' || selectedBatchInfo.status === 'completed' ? 'text-amber-600' : 'text-gray-400']">
+              <div :class="['w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md', selectedBatchInfo.status === 'pending_review' || selectedBatchInfo.status === 'completed' ? 'bg-amber-500' : 'bg-gray-300']">
+                2
+              </div>
+              <span class="text-xs font-medium mt-2">待复核</span>
+              <span class="text-xs text-gray-500">复核确认中</span>
+            </div>
+            
+            <div :class="['flex-1 h-1 mx-2 rounded', selectedBatchInfo.status === 'completed' ? 'bg-green-500' : 'bg-gray-200']"></div>
+            
+            <div :class="['flex flex-col items-center', selectedBatchInfo.status === 'completed' ? 'text-green-600' : 'text-gray-400']">
+              <div :class="['w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md', selectedBatchInfo.status === 'completed' ? 'bg-green-500' : 'bg-gray-300']">
+                3
+              </div>
+              <span class="text-xs font-medium mt-2">已完成</span>
+              <span class="text-xs text-gray-500">正式交接</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="w-full bg-gray-200 rounded-full h-2 mt-5">
+          <div 
+            :class="['h-2 rounded-full transition-all duration-500', selectedBatchInfo.status === 'completed' ? 'bg-green-500' : selectedBatchInfo.status === 'pending_review' ? 'bg-amber-500' : 'bg-blue-500']"
+            :style="{ width: `${selectedBatchInfo.stats.total > 0 ? selectedBatchInfo.stats.reviewed / selectedBatchInfo.stats.total * 100 : 0}%` }"
+          ></div>
+        </div>
+
+        <p v-if="selectedBatchInfo.status === 'completed'" class="text-green-700 text-sm mt-4 text-center font-medium bg-green-100 rounded-lg py-2">
+          🔒 该批次已正式交接完成，内容只读，不可调整顺序或修改异常
+        </p>
+        <p v-else-if="selectedBatchInfo.status === 'pending_review'" class="text-amber-700 text-sm mt-4 text-center font-medium bg-amber-100 rounded-lg py-2">
+          ⏳ 复核进行中，请确认所有物资包已复核且异常已解决
+        </p>
+        <p v-else class="text-blue-700 text-sm mt-4 text-center font-medium bg-blue-100 rounded-lg py-2">
+          🔄 正在进行物资装袋和排序，完成后请通知复核人员
+        </p>
       </div>
 
       <div v-if="!selectedBatchInfo" class="bg-primary-50 border border-primary-200 rounded-xl p-4 mb-8 no-print">

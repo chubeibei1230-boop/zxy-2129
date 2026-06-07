@@ -2,7 +2,7 @@
 import { ref, computed, onUnmounted } from 'vue';
 import PageHeader from '@/components/PageHeader.vue';
 import { useMaterialStore } from '@/stores/material';
-import { getPriorityLabel, getPriorityColor, getExceptionTypeLabel, getExceptionTypeColor, getExceptionStatusLabel, getExceptionStatusColor, getExceptionPriorityLabel, formatDateTime } from '@/utils/helpers';
+import { getPriorityLabel, getPriorityColor, getExceptionTypeLabel, getExceptionTypeColor, getExceptionStatusLabel, getExceptionStatusColor, getExceptionPriorityLabel, formatDateTime, getBatchStatusLabel, getBatchStatusColor, getBatchStatusIcon } from '@/utils/helpers';
 import type { MaterialPack } from '@/types';
 import Modal from '@/components/Modal.vue';
 
@@ -44,6 +44,24 @@ const filteredPacks = computed(() => {
   
   return packs;
 });
+
+const selectedBatchInfo = computed(() => {
+  if (filterBatch.value === 'all') return null;
+  const batch = store.batches.find(b => b.id === filterBatch.value);
+  if (!batch) return null;
+  const stats = store.getBatchStats(filterBatch.value);
+  return { ...batch, stats };
+});
+
+function isBatchCompleted(batchId: string): boolean {
+  const batch = store.batches.find(b => b.id === batchId);
+  return batch?.status === 'completed';
+}
+
+function isCurrentBatchCompleted(): boolean {
+  if (filterBatch.value === 'all') return false;
+  return isBatchCompleted(filterBatch.value);
+}
 
 function getBatchName(id: string) {
   return store.batchMap.get(id)?.name || '未分配';
@@ -323,20 +341,72 @@ async function handleDeferException() {
           <div class="flex-1" />
           <div class="flex items-center gap-2">
             <span class="text-sm text-gray-500">快速排序:</span>
-            <button @click="store.sortByPriority()" class="btn btn-outline text-sm px-3 py-1.5">
+            <button 
+              @click="store.sortByPriority()" 
+              :disabled="isCurrentBatchCompleted()"
+              :class="['btn text-sm px-3 py-1.5', isCurrentBatchCompleted() ? 'btn-outline opacity-50 cursor-not-allowed' : 'btn-outline']"
+            >
               按优先级
             </button>
-            <button @click="store.sortByBatch()" class="btn btn-outline text-sm px-3 py-1.5">
+            <button 
+              @click="store.sortByBatch()" 
+              :disabled="isCurrentBatchCompleted()"
+              :class="['btn text-sm px-3 py-1.5', isCurrentBatchCompleted() ? 'btn-outline opacity-50 cursor-not-allowed' : 'btn-outline']"
+            >
               按批次
             </button>
-            <button @click="store.sortByArea()" class="btn btn-outline text-sm px-3 py-1.5">
+            <button 
+              @click="store.sortByArea()" 
+              :disabled="isCurrentBatchCompleted()"
+              :class="['btn text-sm px-3 py-1.5', isCurrentBatchCompleted() ? 'btn-outline opacity-50 cursor-not-allowed' : 'btn-outline']"
+            >
               按区域
             </button>
           </div>
         </div>
       </div>
 
-      <div class="bg-primary-50 border border-primary-200 rounded-xl p-4 mb-8 no-print">
+      <div v-if="selectedBatchInfo" :class="['rounded-xl p-4 mb-8 no-print', selectedBatchInfo.status === 'completed' ? 'bg-green-50 border border-green-200' : 'bg-primary-50 border border-primary-200']">
+        <div class="flex items-start gap-3">
+          <span class="text-2xl">{{ selectedBatchInfo.status === 'completed' ? '✅' : '💡' }}</span>
+          <div class="flex-1">
+            <div class="flex items-center gap-2 mb-2">
+              <p :class="['font-medium', selectedBatchInfo.status === 'completed' ? 'text-green-800' : 'text-primary-800']">
+                {{ selectedBatchInfo.name }} - 批次进度
+              </p>
+              <span :class="['tag', getBatchStatusColor(selectedBatchInfo.status)]">
+                {{ getBatchStatusIcon(selectedBatchInfo.status) }} {{ getBatchStatusLabel(selectedBatchInfo.status) }}
+              </span>
+            </div>
+            <div class="flex items-center gap-4 text-sm mb-2">
+              <span>
+                <span class="font-medium">{{ selectedBatchInfo.stats.reviewed }}</span>
+                <span class="text-gray-500">/{{ selectedBatchInfo.stats.total }} 已复核</span>
+              </span>
+              <span v-if="selectedBatchInfo.stats.unresolvedExceptions > 0" class="text-red-500">
+                ⚠️ {{ selectedBatchInfo.stats.unresolvedExceptions }} 个未解决异常
+              </span>
+              <span v-else class="text-green-600">
+                ✅ 无待处理异常
+              </span>
+              <span v-if="selectedBatchInfo.status === 'completed' && selectedBatchInfo.completedAt" class="text-green-600">
+                完成时间: {{ formatDateTime(selectedBatchInfo.completedAt) }}
+              </span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-2.5">
+              <div 
+                :class="['h-2.5 rounded-full transition-all', selectedBatchInfo.status === 'completed' ? 'bg-green-500' : 'bg-primary-600']"
+                :style="{ width: `${selectedBatchInfo.stats.total > 0 ? selectedBatchInfo.stats.reviewed / selectedBatchInfo.stats.total * 100 : 0}%` }"
+              ></div>
+            </div>
+            <p v-if="selectedBatchInfo.status === 'completed'" class="text-green-600 text-sm mt-2">
+              该批次已正式交接完成，内容只读，不可调整顺序或修改异常。
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="!selectedBatchInfo" class="bg-primary-50 border border-primary-200 rounded-xl p-4 mb-8 no-print">
         <div class="flex items-start gap-3">
           <span class="text-2xl">💡</span>
           <div>
@@ -359,21 +429,22 @@ async function handleDeferException() {
           v-for="(pack, index) in filteredPacks"
           :key="pack.id"
           :ref="(el) => setCardRef(el, index)"
-          draggable="true"
-          @dragstart="onDragStart($event, index)"
-          @dragover="onDragOver($event, index)"
+          :draggable="!isBatchCompleted(pack.batchId)"
+          @dragstart="!isBatchCompleted(pack.batchId) && onDragStart($event, index)"
+          @dragover="!isBatchCompleted(pack.batchId) && onDragOver($event, index)"
           @dragleave="onDragLeave"
-          @drop="onDrop($event, index)"
+          @drop="!isBatchCompleted(pack.batchId) && onDrop($event, index)"
           @dragend="onDragEnd"
-          @touchstart="onTouchStart($event, index)"
-          @touchmove="onTouchMove($event)"
+          @touchstart="!isBatchCompleted(pack.batchId) && onTouchStart($event, index)"
+          @touchmove="!isBatchCompleted(pack.batchId) && onTouchMove($event)"
           @touchend="onTouchEnd"
           :class="[
-            'rounded-xl shadow-sm p-5 cursor-grab active:cursor-grabbing transition-all duration-200 relative group select-none touch-none',
-            pack.exception ? 'bg-amber-50 border-2 border-amber-300' : 'bg-white',
+            'rounded-xl shadow-sm p-5 transition-all duration-200 relative group select-none',
+            isBatchCompleted(pack.batchId) ? 'cursor-default bg-gray-50 border-2 border-gray-200' : 'cursor-grab active:cursor-grabbing touch-none',
+            pack.exception && !isBatchCompleted(pack.batchId) ? 'bg-amber-50 border-2 border-amber-300' : '',
             isDragging(pack) ? 'opacity-50 scale-105 shadow-lg z-10' : '',
             isDragOver(pack) ? 'ring-2 ring-primary-500 ring-offset-2' : '',
-            'hover:shadow-md',
+            !isBatchCompleted(pack.batchId) ? 'hover:shadow-md' : '',
           ]"
         >
           <div class="absolute -top-2 -left-2 w-8 h-8 bg-primary-600 text-white rounded-full flex items-center justify-center text-sm font-bold shadow-md">
@@ -430,11 +501,15 @@ async function handleDeferException() {
 
             <div v-if="pack.exception" class="mt-3 pt-3 border-t border-gray-100">
               <button
+                v-if="!isBatchCompleted(pack.batchId)"
                 @click.stop="openExceptionModal(pack)"
                 class="w-full btn btn-outline text-sm py-1.5"
               >
                 处理异常
               </button>
+              <span v-else class="w-full text-center text-sm text-gray-400">
+                只读 - 已完成批次
+              </span>
             </div>
           </div>
         </div>

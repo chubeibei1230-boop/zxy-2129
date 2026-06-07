@@ -2,6 +2,8 @@ export type ExceptionType = 'shortage' | 'incomplete' | 'area_pending' | 'cancel
 
 export type ExceptionStatus = 'pending' | 'processing' | 'resolved' | null;
 
+export type BatchStatus = 'in_progress' | 'pending_review' | 'completed';
+
 export interface ExceptionRecord {
   type: ExceptionType;
   priority: number;
@@ -34,6 +36,9 @@ export interface Batch {
   name: string;
   deliveryTime: string;
   priority: number;
+  status: BatchStatus;
+  completedAt?: string;
+  closedBy?: string;
   createdAt: string;
 }
 

@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue';
 import PageHeader from '@/components/PageHeader.vue';
 import { useMaterialStore } from '@/stores/material';
-import { formatDateTime, getPriorityLabel, getPriorityColor, getExceptionTypeLabel, getExceptionTypeColor, getExceptionStatusLabel, getExceptionStatusColor } from '@/utils/helpers';
+import { formatDateTime, getPriorityLabel, getPriorityColor, getExceptionTypeLabel, getExceptionTypeColor, getExceptionStatusLabel, getExceptionStatusColor, getBatchStatusLabel, getBatchStatusColor, getBatchStatusIcon } from '@/utils/helpers';
 import type { MaterialPack, Batch } from '@/types';
 
 const store = useMaterialStore();
@@ -16,10 +16,15 @@ const batchesWithPacks = computed(() => {
     (p: MaterialPack) => !p.batchId || !batchIds.has(p.batchId)
   );
 
-  const result = store.batches.map((batch: Batch) => ({
-    ...batch,
-    packs: store.materialPacks.filter((p: MaterialPack) => p.batchId === batch.id),
-  })).filter((b: { packs: MaterialPack[] }) => b.packs.length > 0);
+  const result = store.batches.map((batch: Batch) => {
+    const packs = store.materialPacks.filter((p: MaterialPack) => p.batchId === batch.id);
+    const stats = store.getBatchStats(batch.id);
+    return {
+      ...batch,
+      packs,
+      stats,
+    };
+  }).filter((b: { packs: MaterialPack[] }) => b.packs.length > 0);
 
   if (unassignedPacks.length > 0) {
     result.unshift({
@@ -27,13 +32,19 @@ const batchesWithPacks = computed(() => {
       name: '未分配批次',
       deliveryTime: '',
       priority: 999,
+      status: 'in_progress' as const,
       createdAt: '',
       packs: unassignedPacks,
+      stats: { total: unassignedPacks.length, reviewed: unassignedPacks.filter(p => p.reviewed).length, unresolvedExceptions: 0, unreviewed: unassignedPacks.filter(p => !p.reviewed).length },
     });
   }
 
   return result;
 });
+
+function isBatchCompleted(batch: any): boolean {
+  return batch?.status === 'completed';
+}
 
 const reviewedCount = computed(() => {
   return store.materialPacks.filter((p: MaterialPack) => p.reviewed).length;
@@ -141,19 +152,34 @@ function printNow() {
           :class="['print-page', batchIndex > 0 ? 'pt-8' : '']"
         >
           <!-- 批次标题 -->
-          <div class="flex items-center justify-between mb-4 no-print">
+          <div :class="['flex items-center justify-between mb-4 no-print', isBatchCompleted(batch) ? 'p-4 bg-green-50 rounded-xl border border-green-200' : '']">
             <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
               <span class="w-8 h-8 bg-info-500 text-white rounded-lg flex items-center justify-center text-sm">
                 {{ batchIndex + 1 }}
               </span>
               {{ batch.name }}
+              <span :class="['tag', getBatchStatusColor(batch.status)]">
+                {{ getBatchStatusIcon(batch.status) }} {{ getBatchStatusLabel(batch.status) }}
+              </span>
               <span class="text-sm font-normal text-gray-500">
                 ({{ batch.packs.length }} 个物资包)
               </span>
             </h2>
-            <span v-if="batch.deliveryTime" class="text-sm text-gray-500">
-              配送时间: {{ batch.deliveryTime }}
-            </span>
+            <div class="flex items-center gap-4">
+              <div class="text-sm text-gray-500">
+                <span class="text-primary-600 font-medium">{{ batch.stats.reviewed }}</span>
+                <span>/{{ batch.stats.total }} 已复核</span>
+                <span v-if="batch.stats.unresolvedExceptions > 0" class="ml-2 text-red-500">
+                  ⚠️ {{ batch.stats.unresolvedExceptions }} 个异常
+                </span>
+              </div>
+              <span v-if="batch.deliveryTime" class="text-sm text-gray-500">
+                配送时间: {{ batch.deliveryTime }}
+              </span>
+              <span v-if="isBatchCompleted(batch) && batch.completedAt" class="text-sm text-green-600">
+                完成时间: {{ formatDateTime(batch.completedAt) }}
+              </span>
+            </div>
           </div>
 
           <!-- 打印时的批次标题 -->
@@ -200,7 +226,11 @@ function printNow() {
                       type="checkbox"
                       :checked="pack.reviewed"
                       @change="toggleReview(pack)"
-                      class="w-5 h-5 text-primary-600 rounded border-gray-300 focus:ring-primary-500 cursor-pointer"
+                      :disabled="isBatchCompleted(batch)"
+                      :class="[
+                        'w-5 h-5 rounded border-gray-300 focus:ring-primary-500',
+                        isBatchCompleted(batch) ? 'cursor-not-allowed opacity-60' : 'cursor-pointer text-primary-600'
+                      ]"
                     />
                   </td>
                   <td class="font-medium">{{ pack.name }}</td>

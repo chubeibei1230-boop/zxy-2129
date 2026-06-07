@@ -3,7 +3,7 @@ import { ref, reactive } from 'vue';
 import PageHeader from '@/components/PageHeader.vue';
 import Modal from '@/components/Modal.vue';
 import { useMaterialStore } from '@/stores/material';
-import { getPriorityLabel, getPriorityColor, getExceptionTypeLabel, getExceptionTypeColor, getExceptionStatusLabel, getExceptionStatusColor, getExceptionPriorityLabel, getExceptionPriorityColor } from '@/utils/helpers';
+import { getPriorityLabel, getPriorityColor, getExceptionTypeLabel, getExceptionTypeColor, getExceptionStatusLabel, getExceptionStatusColor, getExceptionPriorityLabel, getExceptionPriorityColor, getBatchStatusLabel, getBatchStatusColor, getBatchStatusIcon, formatDateTime } from '@/utils/helpers';
 import type { MaterialPack, Batch, Area } from '@/types';
 
 const store = useMaterialStore();
@@ -23,8 +23,12 @@ const showPackModal = ref(false);
 const showBatchModal = ref(false);
 const showAreaModal = ref(false);
 const showExceptionModal = ref(false);
+const showCloseBatchModal = ref(false);
 const editingId = ref<string | null>(null);
 const exceptionPackId = ref<string | null>(null);
+const closingBatchId = ref<string | null>(null);
+const closeReasons = ref<string[]>([]);
+const coordinatorName = ref('');
 
 // 表单数据
 const packForm = reactive({
@@ -190,6 +194,50 @@ async function deleteArea(id: string) {
   }
 }
 
+function openCloseBatch(batchId: string) {
+  closingBatchId.value = batchId;
+  const { canClose, reasons } = store.canCloseBatch(batchId);
+  closeReasons.value = reasons;
+  
+  if (!canClose) {
+    showCloseBatchModal.value = true;
+  } else {
+    if (confirm('确认要闭环此批次吗？闭环后将无法修改批次内容。')) {
+      handleConfirmClose();
+    }
+  }
+}
+
+async function handleConfirmClose() {
+  if (!closingBatchId.value) return;
+  
+  try {
+    await store.closeBatch(closingBatchId.value, coordinatorName.value || undefined);
+    showCloseBatchModal.value = false;
+    closingBatchId.value = null;
+    closeReasons.value = [];
+    coordinatorName.value = '';
+  } catch (error: any) {
+    alert(`无法闭环批次：${error.message}`);
+  }
+}
+
+function cancelCloseBatch() {
+  showCloseBatchModal.value = false;
+  closingBatchId.value = null;
+  closeReasons.value = [];
+  coordinatorName.value = '';
+}
+
+function isBatchCompleted(batchId: string): boolean {
+  const batch = store.batches.find(b => b.id === batchId);
+  return batch?.status === 'completed';
+}
+
+function getBatchStats(batchId: string) {
+  return store.batchStatsMap.get(batchId) || { total: 0, reviewed: 0, unresolvedExceptions: 0, unreviewed: 0 };
+}
+
 function resetExceptionForm() {
   exceptionForm.type = 'shortage';
   exceptionForm.priority = 2;
@@ -322,25 +370,30 @@ function getAreaName(id: string) {
                 </td>
                 <td>
                   <div class="flex items-center gap-2">
-                    <button
-                      @click="openEditPack(pack)"
-                      class="text-primary-600 hover:text-primary-700 text-sm font-medium"
-                    >
-                      编辑
-                    </button>
-                    <button
-                      @click="openAddException(pack.id)"
-                      :class="pack.exception ? 'text-amber-600 hover:text-amber-700' : 'text-blue-600 hover:text-blue-700'"
-                      class="text-sm font-medium"
-                    >
-                      {{ pack.exception ? '修改异常' : '登记异常' }}
-                    </button>
-                    <button
-                      @click="deletePack(pack.id)"
-                      class="text-red-500 hover:text-red-600 text-sm font-medium"
-                    >
-                      删除
-                    </button>
+                    <template v-if="!isBatchCompleted(pack.batchId)">
+                      <button
+                        @click="openEditPack(pack)"
+                        class="text-primary-600 hover:text-primary-700 text-sm font-medium"
+                      >
+                        编辑
+                      </button>
+                      <button
+                        @click="openAddException(pack.id)"
+                        :class="pack.exception ? 'text-amber-600 hover:text-amber-700' : 'text-blue-600 hover:text-blue-700'"
+                        class="text-sm font-medium"
+                      >
+                        {{ pack.exception ? '修改异常' : '登记异常' }}
+                      </button>
+                      <button
+                        @click="deletePack(pack.id)"
+                        class="text-red-500 hover:text-red-600 text-sm font-medium"
+                      >
+                        删除
+                      </button>
+                    </template>
+                    <span v-else class="text-gray-400 text-sm">
+                      只读
+                    </span>
                   </div>
                 </td>
               </tr>
@@ -367,36 +420,90 @@ function getAreaName(id: string) {
         </div>
 
         <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <div v-for="batch in store.batches" :key="batch.id" class="card">
+          <div v-for="batch in store.batches" :key="batch.id" :class="['card', batch.status === 'completed' ? 'border-2 border-green-300 bg-green-50/30' : '']">
             <div class="flex items-start justify-between">
-              <div>
-                <h3 class="font-bold text-gray-800 text-lg">{{ batch.name }}</h3>
-                <p class="text-gray-500 text-sm mt-1">
+              <div class="flex-1">
+                <div class="flex items-center gap-2 mb-2">
+                  <h3 class="font-bold text-gray-800 text-lg">{{ batch.name }}</h3>
+                  <span :class="['tag', getBatchStatusColor(batch.status)]">
+                    {{ getBatchStatusIcon(batch.status) }} {{ getBatchStatusLabel(batch.status) }}
+                  </span>
+                </div>
+                <p class="text-gray-500 text-sm">
                   <span class="mr-1">⏰</span>配送时间: {{ batch.deliveryTime || '未设置' }}
                 </p>
-                <div class="mt-3">
+                <p v-if="batch.status === 'completed' && batch.completedAt" class="text-gray-500 text-sm mt-1">
+                  <span class="mr-1">✅</span>完成时间: {{ formatDateTime(batch.completedAt) }}
+                </p>
+                <p v-if="batch.status === 'completed' && batch.closedBy" class="text-gray-500 text-sm">
+                  <span class="mr-1">👤</span>闭环人: {{ batch.closedBy }}
+                </p>
+                
+                <div class="mt-3 space-y-2">
                   <span :class="['tag', getPriorityColor(batch.priority)]">
                     优先级: {{ getPriorityLabel(batch.priority) }}
                   </span>
+                  
+                  <div class="flex flex-wrap gap-2 mt-2">
+                    <span class="tag tag-gray text-xs">
+                      📦 共 {{ getBatchStats(batch.id).total }} 个
+                    </span>
+                    <span class="tag tag-primary text-xs">
+                      ✅ 已复核 {{ getBatchStats(batch.id).reviewed }}
+                    </span>
+                    <span v-if="getBatchStats(batch.id).unresolvedExceptions > 0" class="tag bg-red-100 text-red-800 text-xs">
+                      ⚠️ 异常 {{ getBatchStats(batch.id).unresolvedExceptions }}
+                    </span>
+                  </div>
+                  
+                  <div class="mt-3">
+                    <div class="flex items-center justify-between text-xs text-gray-500 mb-1">
+                      <span>复核进度</span>
+                      <span>{{ getBatchStats(batch.id).total > 0 ? Math.round(getBatchStats(batch.id).reviewed / getBatchStats(batch.id).total * 100) : 0 }}%</span>
+                    </div>
+                    <div class="w-full bg-gray-200 rounded-full h-2">
+                      <div 
+                        class="bg-primary-600 h-2 rounded-full transition-all" 
+                        :style="{ width: `${getBatchStats(batch.id).total > 0 ? getBatchStats(batch.id).reviewed / getBatchStats(batch.id).total * 100 : 0}%` }"
+                      ></div>
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div class="flex items-center gap-2">
+              <div class="flex flex-col items-center gap-2 ml-3">
                 <button
+                  v-if="batch.status !== 'completed'"
                   @click="openEditBatch(batch)"
                   class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-600"
+                  :title="'编辑'"
                 >
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                   </svg>
                 </button>
                 <button
+                  v-if="batch.status !== 'completed'"
                   @click="deleteBatch(batch.id)"
                   class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-red-50 text-red-500"
+                  :title="'删除'"
                 >
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                   </svg>
                 </button>
+              </div>
+            </div>
+            
+            <div class="mt-4 pt-4 border-t border-gray-100">
+              <button
+                v-if="batch.status !== 'completed'"
+                @click="openCloseBatch(batch.id)"
+                class="w-full btn btn-primary text-sm py-2"
+              >
+                <span class="mr-1">🔒</span>发起闭环确认
+              </button>
+              <div v-else class="text-center text-sm text-green-600 font-medium">
+                ✅ 已正式交接完成，内容只读
               </div>
             </div>
           </div>
@@ -704,6 +811,49 @@ function getAreaName(id: string) {
       <template #footer>
         <button @click="showExceptionModal = false" class="btn btn-outline">取消</button>
         <button @click="saveException" class="btn btn-primary">保存</button>
+      </template>
+    </Modal>
+
+    <!-- 闭环确认弹窗 -->
+    <Modal v-model:visible="showCloseBatchModal" title="批次闭环确认">
+      <div class="space-y-4">
+        <div v-if="closeReasons.length > 0" class="bg-red-50 border border-red-200 rounded-lg p-4">
+          <h4 class="font-bold text-red-800 mb-2">⚠️ 无法闭环，存在以下问题：</h4>
+          <ul class="list-disc list-inside text-red-700 text-sm space-y-1">
+            <li v-for="(reason, idx) in closeReasons" :key="idx">{{ reason }}</li>
+          </ul>
+          <p class="text-red-600 text-sm mt-3">请先处理以上问题后再尝试闭环。</p>
+        </div>
+        <div v-else class="bg-green-50 border border-green-200 rounded-lg p-4">
+          <h4 class="font-bold text-green-800 mb-2">✅ 可以闭环</h4>
+          <p class="text-green-700 text-sm">该批次所有物资包已复核，所有异常已解决。</p>
+        </div>
+        
+        <div v-if="closeReasons.length === 0">
+          <label class="block text-sm font-medium text-gray-700 mb-1">闭环人姓名（可选）</label>
+          <input 
+            v-model="coordinatorName" 
+            type="text" 
+            class="input" 
+            placeholder="请输入您的姓名"
+          />
+        </div>
+        
+        <div class="bg-amber-50 border border-amber-200 rounded-lg p-3">
+          <p class="text-amber-800 text-sm">
+            <span class="font-bold">💡 提示：</span>闭环后该批次下的所有内容将变为只读，无法再进行修改、调整顺序或新增异常。
+          </p>
+        </div>
+      </div>
+      <template #footer>
+        <button @click="cancelCloseBatch" class="btn btn-outline">取消</button>
+        <button 
+          v-if="closeReasons.length === 0"
+          @click="handleConfirmClose" 
+          class="btn btn-primary"
+        >
+          确认闭环
+        </button>
       </template>
     </Modal>
   </div>

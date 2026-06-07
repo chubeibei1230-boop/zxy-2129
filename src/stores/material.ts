@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import type { MaterialPack, Batch, Area, UserRole, ExportData, ExceptionRecord, ExceptionType, ExceptionStatus } from '@/types';
+import type { MaterialPack, Batch, Area, UserRole, ExportData, ExceptionRecord, ExceptionType, ExceptionStatus, BatchStatus } from '@/types';
 import {
   getAllMaterialPacks,
   addMaterialPack,
@@ -51,6 +51,22 @@ export const useMaterialStore = defineStore('material', () => {
     return grouped;
   });
 
+  function getBatchStats(batchId: string) {
+    const packs = materialPacksByBatch.value.get(batchId) || [];
+    const total = packs.length;
+    const reviewed = packs.filter(p => p.reviewed).length;
+    const unresolvedExceptions = packs.filter(p => p.exception && p.exception.status !== 'resolved').length;
+    return { total, reviewed, unresolvedExceptions, unreviewed: total - reviewed };
+  }
+
+  const batchStatsMap = computed(() => {
+    const map = new Map<string, ReturnType<typeof getBatchStats>>();
+    batches.value.forEach(b => {
+      map.set(b.id, getBatchStats(b.id));
+    });
+    return map;
+  });
+
   async function init() {
     if (initialized.value) return;
     isLoading.value = true;
@@ -80,9 +96,9 @@ export const useMaterialStore = defineStore('material', () => {
     const now = new Date().toISOString();
     
     const demoBatches: Batch[] = [
-      { id: 'batch-1', name: '第一批次', deliveryTime: '2024-06-08 09:00', priority: 1, createdAt: now },
-      { id: 'batch-2', name: '第二批次', deliveryTime: '2024-06-08 14:00', priority: 2, createdAt: now },
-      { id: 'batch-3', name: '第三批次', deliveryTime: '2024-06-09 09:00', priority: 3, createdAt: now },
+      { id: 'batch-1', name: '第一批次', deliveryTime: '2024-06-08 09:00', priority: 1, status: 'in_progress', createdAt: now },
+      { id: 'batch-2', name: '第二批次', deliveryTime: '2024-06-08 14:00', priority: 2, status: 'in_progress', createdAt: now },
+      { id: 'batch-3', name: '第三批次', deliveryTime: '2024-06-09 09:00', priority: 3, status: 'in_progress', createdAt: now },
     ];
 
     const demoAreas: Area[] = [
@@ -179,10 +195,11 @@ export const useMaterialStore = defineStore('material', () => {
   }
 
   // Batch 操作
-  async function createBatch(data: Omit<Batch, 'id' | 'createdAt'>) {
+  async function createBatch(data: Omit<Batch, 'id' | 'status' | 'createdAt'>) {
     const newBatch: Batch = {
       ...data,
       id: generateId(),
+      status: 'in_progress',
       createdAt: new Date().toISOString(),
     };
     await addBatch(newBatch);
@@ -204,6 +221,56 @@ export const useMaterialStore = defineStore('material', () => {
   async function removeBatch(id: string) {
     await deleteBatch(id);
     batches.value = batches.value.filter(b => b.id !== id);
+  }
+
+  async function updateBatchStatus(batchId: string, status: BatchStatus, closedBy?: string) {
+    const index = batches.value.findIndex(b => b.id === batchId);
+    if (index === -1) return;
+
+    const updated: Batch = {
+      ...batches.value[index],
+      status,
+      completedAt: status === 'completed' ? new Date().toISOString() : undefined,
+      closedBy: status === 'completed' ? closedBy : undefined,
+    };
+    await updateBatch(updated);
+    batches.value[index] = updated;
+    batches.value.sort((a, b) => a.priority - b.priority);
+  }
+
+  function canCloseBatch(batchId: string): { canClose: boolean; reasons: string[] } {
+    const stats = getBatchStats(batchId);
+    const reasons: string[] = [];
+
+    if (stats.unreviewed > 0) {
+      reasons.push(`还有 ${stats.unreviewed} 个物资包未复核`);
+    }
+    if (stats.unresolvedExceptions > 0) {
+      reasons.push(`还有 ${stats.unresolvedExceptions} 个未解决的异常`);
+    }
+
+    return { canClose: reasons.length === 0, reasons };
+  }
+
+  async function closeBatch(batchId: string, closedBy?: string) {
+    const { canClose, reasons } = canCloseBatch(batchId);
+    if (!canClose) {
+      throw new Error(reasons.join('；'));
+    }
+    await updateBatchStatus(batchId, 'completed', closedBy);
+  }
+
+  async function autoUpdateBatchStatus(batchId: string) {
+    const batch = batches.value.find(b => b.id === batchId);
+    if (!batch || batch.status === 'completed') return;
+
+    const stats = getBatchStats(batchId);
+    
+    if (stats.total > 0 && stats.reviewed === stats.total && stats.unresolvedExceptions === 0) {
+      await updateBatchStatus(batchId, 'pending_review');
+    } else if (batch.status === 'pending_review' && (stats.unreviewed > 0 || stats.unresolvedExceptions > 0)) {
+      await updateBatchStatus(batchId, 'in_progress');
+    }
   }
 
   // Area 操作
@@ -245,6 +312,8 @@ export const useMaterialStore = defineStore('material', () => {
       reviewer: reviewed ? reviewer : undefined,
       reviewTime: reviewed ? new Date().toISOString() : undefined,
     });
+
+    await autoUpdateBatchStatus(pack.batchId);
   }
 
   // 异常处理操作
@@ -268,6 +337,10 @@ export const useMaterialStore = defineStore('material', () => {
       updatedAt: now,
     };
     await updateMaterialPackData(packId, { exception });
+    
+    if (existingPack) {
+      await autoUpdateBatchStatus(existingPack.batchId);
+    }
   }
 
   async function updateExceptionStatus(packId: string, status: ExceptionStatus, handler?: string) {
@@ -281,6 +354,7 @@ export const useMaterialStore = defineStore('material', () => {
       updatedAt: new Date().toISOString(),
     };
     await updateMaterialPackData(packId, { exception });
+    await autoUpdateBatchStatus(pack.batchId);
   }
 
   async function updateExceptionResult(packId: string, result: string) {
@@ -294,10 +368,15 @@ export const useMaterialStore = defineStore('material', () => {
       updatedAt: new Date().toISOString(),
     };
     await updateMaterialPackData(packId, { exception });
+    await autoUpdateBatchStatus(pack.batchId);
   }
 
   async function clearException(packId: string) {
+    const pack = materialPacks.value.find(p => p.id === packId);
     await updateMaterialPackData(packId, { exception: null });
+    if (pack) {
+      await autoUpdateBatchStatus(pack.batchId);
+    }
   }
 
   const exceptionPacks = computed(() => {
@@ -370,6 +449,7 @@ export const useMaterialStore = defineStore('material', () => {
     batchMap,
     areaMap,
     materialPacksByBatch,
+    batchStatsMap,
     exceptionPacks,
     resolvedExceptionPacks,
     init,
@@ -382,6 +462,10 @@ export const useMaterialStore = defineStore('material', () => {
     createBatch,
     updateBatchData,
     removeBatch,
+    updateBatchStatus,
+    canCloseBatch,
+    closeBatch,
+    getBatchStats,
     createArea,
     updateAreaData,
     removeArea,

@@ -125,6 +125,33 @@ export function getExceptionPriorityColor(priority: number): string {
   return colors[priority] || 'bg-yellow-100 text-yellow-800';
 }
 
+export function getBatchStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    in_progress: '进行中',
+    pending_review: '待复核',
+    completed: '已完成',
+  };
+  return labels[status] || '未知';
+}
+
+export function getBatchStatusColor(status: string): string {
+  const colors: Record<string, string> = {
+    in_progress: 'bg-blue-100 text-blue-800',
+    pending_review: 'bg-amber-100 text-amber-800',
+    completed: 'bg-green-100 text-green-800',
+  };
+  return colors[status] || 'bg-gray-100 text-gray-800';
+}
+
+export function getBatchStatusIcon(status: string): string {
+  const icons: Record<string, string> = {
+    in_progress: '🔄',
+    pending_review: '⏳',
+    completed: '✅',
+  };
+  return icons[status] || '❓';
+}
+
 export function debounce<T extends (...args: any[]) => any>(
   func: T,
   wait: number

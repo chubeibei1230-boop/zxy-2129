@@ -292,7 +292,7 @@ export const useMaterialStore = defineStore('material', () => {
   function sortByArea() {
     materialPacks.value.sort((a, b) => {
       const areaA = areaMap.value.get(a.areaId)?.priority || 999;
-      const areaB = areaMap.value.get(b.batchId)?.priority || 999;
+      const areaB = areaMap.value.get(b.areaId)?.priority || 999;
       if (areaA !== areaB) return areaA - areaB;
       return a.order - b.order;
     });

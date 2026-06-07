@@ -11,10 +11,28 @@ const showReviewerInput = ref(false);
 const selectedReviewer = ref<string>('');
 
 const batchesWithPacks = computed(() => {
-  return store.batches.map((batch: Batch) => ({
+  const batchIds = new Set(store.batches.map(b => b.id));
+  const unassignedPacks = store.materialPacks.filter(
+    (p: MaterialPack) => !p.batchId || !batchIds.has(p.batchId)
+  );
+
+  const result = store.batches.map((batch: Batch) => ({
     ...batch,
     packs: store.materialPacks.filter((p: MaterialPack) => p.batchId === batch.id),
   })).filter((b: { packs: MaterialPack[] }) => b.packs.length > 0);
+
+  if (unassignedPacks.length > 0) {
+    result.unshift({
+      id: 'unassigned',
+      name: '未分配批次',
+      deliveryTime: '',
+      priority: 999,
+      createdAt: '',
+      packs: unassignedPacks,
+    });
+  }
+
+  return result;
 });
 
 const reviewedCount = computed(() => {

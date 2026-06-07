@@ -420,19 +420,27 @@ function getAreaName(id: string) {
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">所属批次</label>
             <select v-model="packForm.batchId" class="select">
+              <option value="" disabled>请先创建批次</option>
               <option v-for="b in store.batches" :key="b.id" :value="b.id">
                 {{ b.name }}
               </option>
             </select>
+            <p v-if="store.batches.length === 0" class="text-xs text-amber-600 mt-1">
+              ⚠️ 暂无批次，请先在"配送批次"标签页创建
+            </p>
           </div>
         </div>
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">配送区域</label>
           <select v-model="packForm.areaId" class="select">
+            <option value="" disabled>请先创建区域</option>
             <option v-for="a in store.areas" :key="a.id" :value="a.id">
               {{ a.name }}
             </option>
           </select>
+          <p v-if="store.areas.length === 0" class="text-xs text-amber-600 mt-1">
+            ⚠️ 暂无区域，请先在"配送区域"标签页创建
+          </p>
         </div>
       </div>
       <template #footer>

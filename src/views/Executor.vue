@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onUnmounted } from 'vue';
 import PageHeader from '@/components/PageHeader.vue';
 import { useMaterialStore } from '@/stores/material';
 import { getPriorityLabel, getPriorityColor } from '@/utils/helpers';
@@ -12,14 +12,22 @@ const filterArea = ref<string>('all');
 const draggedIndex = ref<number | null>(null);
 const dragOverIndex = ref<number | null>(null);
 
+const touchDragIndex = ref<number | null>(null);
+const touchOverIndex = ref<number | null>(null);
+const touchStartPos = ref({ x: 0, y: 0 });
+const touchCurrentPos = ref({ x: 0, y: 0 });
+const isTouchDragging = ref(false);
+const touchGhostEl = ref<HTMLElement | null>(null);
+const cardRefs = ref<HTMLElement[]>([]);
+
 const filteredPacks = computed(() => {
   let packs = [...store.materialPacks];
   
   if (filterBatch.value !== 'all') {
-    packs = packs.filter(p => p.batchId === filterBatch.value);
+    packs = packs.filter((p: MaterialPack) => p.batchId === filterBatch.value);
   }
   if (filterArea.value !== 'all') {
-    packs = packs.filter(p => p.areaId === filterArea.value);
+    packs = packs.filter((p: MaterialPack) => p.areaId === filterArea.value);
   }
   
   return packs;
@@ -78,14 +86,138 @@ function onDragEnd() {
   dragOverIndex.value = null;
 }
 
+function onTouchStart(e: TouchEvent, index: number) {
+  const touch = e.touches[0];
+  touchDragIndex.value = index;
+  touchStartPos.value = { x: touch.clientX, y: touch.clientY };
+  touchCurrentPos.value = { x: touch.clientX, y: touch.clientY };
+  
+  setTimeout(() => {
+    if (touchDragIndex.value === index) {
+      isTouchDragging.value = true;
+      createTouchGhost(index);
+    }
+  }, 200);
+}
+
+function createTouchGhost(index: number) {
+  const cardEl = cardRefs.value[index];
+  if (!cardEl) return;
+  
+  const rect = cardEl.getBoundingClientRect();
+  const ghost = cardEl.cloneNode(true) as HTMLElement;
+  ghost.style.position = 'fixed';
+  ghost.style.left = `${rect.left}px`;
+  ghost.style.top = `${rect.top}px`;
+  ghost.style.width = `${rect.width}px`;
+  ghost.style.zIndex = '9999';
+  ghost.style.opacity = '0.8';
+  ghost.style.pointerEvents = 'none';
+  ghost.style.transform = 'scale(1.05)';
+  ghost.style.boxShadow = '0 20px 40px rgba(0,0,0,0.3)';
+  ghost.style.transition = 'none';
+  
+  document.body.appendChild(ghost);
+  touchGhostEl.value = ghost;
+}
+
+function onTouchMove(e: TouchEvent) {
+  if (touchDragIndex.value === null) return;
+  
+  const touch = e.touches[0];
+  const dx = touch.clientX - touchStartPos.value.x;
+  const dy = touch.clientY - touchStartPos.value.y;
+  
+  if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+    if (!isTouchDragging.value) {
+      isTouchDragging.value = true;
+      createTouchGhost(touchDragIndex.value);
+    }
+  }
+  
+  if (isTouchDragging.value && touchGhostEl.value) {
+    e.preventDefault();
+    touchCurrentPos.value = { x: touch.clientX, y: touch.clientY };
+    
+    const ghost = touchGhostEl.value;
+    const startLeft = parseFloat(ghost.style.left) || 0;
+    const startTop = parseFloat(ghost.style.top) || 0;
+    
+    ghost.style.left = `${startLeft + dx}px`;
+    ghost.style.top = `${startTop + dy}px`;
+    
+    let overIndex = -1;
+    cardRefs.value.forEach((el, idx) => {
+      if (idx === touchDragIndex.value) return;
+      const rect = el.getBoundingClientRect();
+      if (
+        touch.clientX >= rect.left &&
+        touch.clientX <= rect.right &&
+        touch.clientY >= rect.top &&
+        touch.clientY <= rect.bottom
+      ) {
+        overIndex = idx;
+      }
+    });
+    
+    touchOverIndex.value = overIndex >= 0 ? overIndex : null;
+  }
+}
+
+async function onTouchEnd() {
+  if (touchGhostEl.value) {
+    document.body.removeChild(touchGhostEl.value);
+    touchGhostEl.value = null;
+  }
+  
+  if (isTouchDragging.value && touchDragIndex.value !== null && touchOverIndex.value !== null) {
+    if (touchDragIndex.value !== touchOverIndex.value) {
+      const actualFromIndex = store.materialPacks.findIndex(
+        (p: MaterialPack) => p.id === filteredPacks.value[touchDragIndex.value!].id
+      );
+      const actualToIndex = store.materialPacks.findIndex(
+        (p: MaterialPack) => p.id === filteredPacks.value[touchOverIndex.value!].id
+      );
+      
+      await store.moveMaterialPack(actualFromIndex, actualToIndex);
+    }
+  }
+  
+  touchDragIndex.value = null;
+  touchOverIndex.value = null;
+  isTouchDragging.value = false;
+}
+
+function setCardRef(el: any, index: number) {
+  if (el) {
+    cardRefs.value[index] = el;
+  }
+}
+
+onUnmounted(() => {
+  if (touchGhostEl.value) {
+    document.body.removeChild(touchGhostEl.value);
+  }
+});
+
 function isDragging(pack: MaterialPack): boolean {
-  if (draggedIndex.value === null) return false;
-  return filteredPacks.value[draggedIndex.value]?.id === pack.id;
+  if (draggedIndex.value !== null) {
+    return filteredPacks.value[draggedIndex.value]?.id === pack.id;
+  }
+  if (touchDragIndex.value !== null && isTouchDragging.value) {
+    return filteredPacks.value[touchDragIndex.value]?.id === pack.id;
+  }
+  return false;
 }
 
 function isDragOver(pack: MaterialPack): boolean {
-  if (dragOverIndex.value === null) return false;
-  return filteredPacks.value[dragOverIndex.value]?.id === pack.id;
+  if (dragOverIndex.value !== null) {
+    return filteredPacks.value[dragOverIndex.value]?.id === pack.id;
+  }
+  if (touchOverIndex.value !== null) {
+    return filteredPacks.value[touchOverIndex.value]?.id === pack.id;
+  }
+  return false;
 }
 </script>
 
@@ -100,7 +232,6 @@ function isDragOver(pack: MaterialPack): boolean {
     </PageHeader>
 
     <main class="max-w-7xl mx-auto px-6 py-8">
-      <!-- 筛选和排序工具栏 -->
       <div class="bg-white rounded-xl shadow-sm p-4 mb-8 no-print">
         <div class="flex flex-wrap items-center gap-4">
           <div class="flex items-center gap-2">
@@ -137,20 +268,18 @@ function isDragOver(pack: MaterialPack): boolean {
         </div>
       </div>
 
-      <!-- 提示信息 -->
       <div class="bg-primary-50 border border-primary-200 rounded-xl p-4 mb-8 no-print">
         <div class="flex items-start gap-3">
           <span class="text-2xl">💡</span>
           <div>
             <p class="text-primary-800 font-medium">拖拽排序提示</p>
             <p class="text-primary-600 text-sm mt-1">
-              按住物资卡片拖动可以调整装袋顺序，也可以使用上方的快速排序按钮。当前顺序将作为装袋和配送的依据。
+              按住物资卡片拖动可以调整装袋顺序，也可以使用上方的快速排序按钮。手机端请长按卡片后拖动。
             </p>
           </div>
         </div>
       </div>
 
-      <!-- 物资卡片列表 -->
       <div v-if="filteredPacks.length === 0" class="bg-white rounded-xl p-16 text-center">
         <div class="text-6xl mb-4">📦</div>
         <p class="text-gray-500 text-lg">暂无符合条件的物资包</p>
@@ -161,36 +290,36 @@ function isDragOver(pack: MaterialPack): boolean {
         <div
           v-for="(pack, index) in filteredPacks"
           :key="pack.id"
+          :ref="(el) => setCardRef(el, index)"
           draggable="true"
           @dragstart="onDragStart($event, index)"
           @dragover="onDragOver($event, index)"
           @dragleave="onDragLeave"
           @drop="onDrop($event, index)"
           @dragend="onDragEnd"
+          @touchstart="onTouchStart($event, index)"
+          @touchmove="onTouchMove($event)"
+          @touchend="onTouchEnd"
           :class="[
-            'bg-white rounded-xl shadow-sm p-5 cursor-grab active:cursor-grabbing transition-all duration-200 relative group',
+            'bg-white rounded-xl shadow-sm p-5 cursor-grab active:cursor-grabbing transition-all duration-200 relative group select-none touch-none',
             isDragging(pack) ? 'opacity-50 scale-105 shadow-lg z-10' : '',
             isDragOver(pack) ? 'ring-2 ring-primary-500 ring-offset-2' : '',
             'hover:shadow-md',
           ]"
         >
-          <!-- 序号 -->
           <div class="absolute -top-2 -left-2 w-8 h-8 bg-primary-600 text-white rounded-full flex items-center justify-center text-sm font-bold shadow-md">
             {{ store.materialPacks.findIndex((p: MaterialPack) => p.id === pack.id) + 1 }}
           </div>
 
-          <!-- 拖拽手柄 -->
           <div class="absolute top-3 right-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity">
             <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
               <path d="M7 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM13 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM13 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM13 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4z" />
             </svg>
           </div>
 
-          <!-- 内容 -->
           <div class="pt-4">
             <h3 class="font-bold text-gray-800 text-lg mb-3">{{ pack.name }}</h3>
             
-            <!-- 标签 -->
             <div class="flex flex-wrap gap-2 mb-4">
               <span class="tag tag-info">{{ getBatchName(pack.batchId) }}</span>
               <span class="tag tag-accent">{{ getAreaName(pack.areaId) }}</span>
@@ -199,7 +328,6 @@ function isDragOver(pack: MaterialPack): boolean {
               </span>
             </div>
 
-            <!-- 物品清单 -->
             <div class="border-t border-gray-100 pt-3">
               <p class="text-xs text-gray-500 mb-2">包含物品:</p>
               <ul class="text-sm text-gray-600 space-y-1">
@@ -216,7 +344,6 @@ function isDragOver(pack: MaterialPack): boolean {
         </div>
       </div>
 
-      <!-- 底部统计 -->
       <div class="mt-8 bg-white rounded-xl shadow-sm p-4 no-print">
         <div class="flex items-center justify-between text-sm text-gray-500">
           <span>共 {{ filteredPacks.length }} 个物资包</span>
